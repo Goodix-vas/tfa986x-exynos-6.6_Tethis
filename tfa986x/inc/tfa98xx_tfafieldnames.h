@@ -20,7 +20,7 @@ struct tfa_irq_name {
 
 #include "tfa2_tfafieldnames_N1C.h"
 /* diffs for specific devices */
-#include "tfa9866n3_tfafieldnames.h"
+#include "tfa9866n2_tfafieldnames.h"
 
 #ifdef N1A
 #include "tfa98xx_genregs_N1A12.h"

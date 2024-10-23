@@ -420,6 +420,31 @@ static enum tfa98xx_error tfa986x_specific(struct tfa_device *tfa)
 		/* ----- generated code end   ----- */
 		break;
 
+	case 0x100b66:/**TFA9866 N2B0**/
+		/* ----- generated code start(V8)----- */
+		/* -----  version 9 ----- */
+		reg_write(tfa, 0x00, 0xf241); //POR=0xf261
+		reg_write(tfa, 0x02, 0x0c28); //POR=0x0008
+		reg_write(tfa, 0x08, 0x009a); //POR=0x00d2
+		reg_write(tfa, 0x50, 0xc000); //POR=0x8000
+		reg_write(tfa, 0x5a, 0x5f5e); //POR=0x36be
+		reg_write(tfa, 0x5b, 0x74e2); //POR=0x7329
+		reg_write(tfa, 0x5c, 0xb02b); //POR=0xde96
+		reg_write(tfa, 0x5f, 0x00a0); //POR=0x00c0
+		reg_write(tfa, 0x62, 0x06c4); //POR=0x0682
+		reg_write(tfa, 0x63, 0x80d4); //POR=0x0602
+		reg_write(tfa, 0x65, 0x0c58); //POR=0x0458
+		reg_write(tfa, 0x67, 0x006e); //POR=0x0602
+		reg_write(tfa, 0x68, 0x0820); //POR=0x0c20
+		reg_write(tfa, 0x69, 0x0119); //POR=0x0319
+		reg_write(tfa, 0x74, 0x6028); //POR=0x4c14
+		reg_write(tfa, 0x75, 0x1daa); //POR=0x49e0
+		reg_write(tfa, 0x78, 0x0001); //POR=0x000d
+		reg_write(tfa, 0x7c, 0x10f2); //POR=0x1602
+		reg_write(tfa, 0xdd, 0x01b6); //POR=0x01de
+		/* ----- generated code end   ----- */
+		break;
+
 	case 0x200a66: /* Initial revision ID TFA9866 N3A0 */
 		/* ----- generated code start ----- */
 		/* -----  version 5 ----- */
