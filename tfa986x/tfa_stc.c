@@ -13,27 +13,43 @@
 #define TFA_STC_DEV_NAME	"tfa_stc"
 #define FILESIZE_STC	(10)
 
+#define FILESIZE_STC_TUNING	(100)
+
 /* ---------------------------------------------------------------------- */
 
-static ssize_t power_state_show(struct device *dev,
+static ssize_t spkt_show(struct device *dev,
 	struct device_attribute *attr, char *buf);
-static ssize_t power_state_store(struct device *dev,
+static ssize_t spkt_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size);
-static DEVICE_ATTR_RW(power_state);
+static DEVICE_ATTR_RW(spkt);
 
-#if defined(CONFIG_TFA_STEREO_NODE) || defined(TFA_STEREO_NODE)
-static ssize_t power_state_r_show(struct device *dev,
+static ssize_t sknt_show(struct device *dev,
 	struct device_attribute *attr, char *buf);
-static ssize_t power_state_r_store(struct device *dev,
+static ssize_t sknt_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size);
-static DEVICE_ATTR_RW(power_state_r);
-#endif /* (CONFIG_TFA_STEREO_NODE) || (TFA_STEREO_NODE) */
+static DEVICE_ATTR_RW(sknt);
+
+#if defined(TFA_STEREO_NODE)
+static ssize_t spkt_r_show(struct device *dev,
+	struct device_attribute *attr, char *buf);
+static ssize_t spkt_r_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size);
+static DEVICE_ATTR_RW(spkt_r);
+
+static ssize_t sknt_r_show(struct device *dev,
+	struct device_attribute *attr, char *buf);
+static ssize_t sknt_r_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size);
+static DEVICE_ATTR_RW(sknt_r);
+#endif /* TFA_STEREO_NODE */
 
 static struct attribute *tfa_stc_attr[] = {
-	&dev_attr_power_state.attr,
-#if defined(CONFIG_TFA_STEREO_NODE) || defined(TFA_STEREO_NODE)
-	&dev_attr_power_state_r.attr,
-#endif /* (CONFIG_TFA_STEREO_NODE) || (TFA_STEREO_NODE) */
+	&dev_attr_spkt.attr,
+	&dev_attr_sknt.attr,
+#if defined(TFA_STEREO_NODE)
+	&dev_attr_spkt_r.attr,
+	&dev_attr_sknt_r.attr,
+#endif /* TFA_STEREO_NODE */
 	NULL,
 };
 
@@ -45,27 +61,31 @@ static struct attribute_group tfa_stc_attr_grp = {
 
 static struct device *tfa_stc_dev;
 
+static int sknt_data[MAX_HANDLES];
+
 /* ---------------------------------------------------------------------- */
 
-static ssize_t power_state_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
+static ssize_t update_sknt_control(int idx, char *buf)
 {
-	int idx = tfa_get_dev_idx_from_inchannel(0);
-	int value, size;
-	char pstate_result[FILESIZE_STC] = {0};
+	struct tfa_device *tfa = NULL;
+	int size;
+	char sknt_result[FILESIZE_STC] = {0};
 
-	value = tfa_get_power_state(idx);
-	pr_info("%s: tfa_stc - dev %d - power state (%d)\n",
-		__func__, idx, value);
+	tfa = tfa98xx_get_tfa_device_from_index(0);
+	if (tfa == NULL)
+		return -EINVAL; /* unused device */
 
-	snprintf(pstate_result, FILESIZE_STC,
-		"%d", value);
+	if (idx < 0 || idx >= tfa->dev_count)
+		return -EINVAL;
 
-	if (pstate_result[0] == 0)
-		size = snprintf(buf, 1 + 1, "0"); /* no data */
+	snprintf(sknt_result, FILESIZE_STC,
+		"%d", sknt_data[idx]);
+
+	if (sknt_result[0] == 0)
+		size = snprintf(buf, 7 + 1, "no_data"); /* no data */
 	else
-		size = snprintf(buf, strlen(pstate_result) + 1,
-			"%s", pstate_result);
+		size = snprintf(buf, strlen(sknt_result) + 1,
+			"%s", sknt_result);
 
 	if (size <= 0) {
 		pr_err("%s: tfa_stc failed to show in sysfs file\n", __func__);
@@ -75,35 +95,106 @@ static ssize_t power_state_show(struct device *dev,
 	return size;
 }
 
-static ssize_t power_state_store(struct device *dev,
+static ssize_t spkt_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int idx = tfa_get_dev_idx_from_inchannel(0);
+	int value = 0, size;
+	char spkt_result[FILESIZE_STC] = {0};
+
+	value = tfa98xx_update_spkt_data(idx);
+	pr_info("%s: tfa_stc - dev %d - speaker temperature (%d)\n",
+		__func__, idx, value);
+
+	snprintf(spkt_result, FILESIZE_STC,
+		"%d", value);
+
+	if (spkt_result[0] == 0)
+		size = snprintf(buf, 1 + 1, "0"); /* no data */
+	else
+		size = snprintf(buf, strlen(spkt_result) + 1,
+			"%s", spkt_result);
+
+	if (size <= 0) {
+		pr_err("%s: tfa_stc failed to show in sysfs file\n", __func__);
+		return -EINVAL;
+	}
+
+	return size;
+}
+
+static ssize_t spkt_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
-	pr_info("%s: dev %d - not allowed to write power state\n",
+	pr_info("%s: dev %d - not allowed to write speaker temperature\n",
 		__func__, tfa_get_dev_idx_from_inchannel(0));
 
 	return size;
 }
 
-#if defined(CONFIG_TFA_STEREO_NODE) || defined(TFA_STEREO_NODE)
-static ssize_t power_state_r_show(struct device *dev,
+static ssize_t sknt_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int idx = tfa_get_dev_idx_from_inchannel(0);
+	int ret;
+
+	ret = update_sknt_control(idx, buf);
+	if (ret > 0)
+		pr_info("%s: tfa_stc - dev %d - surface temperature (%d)\n",
+			__func__, idx, sknt_data[idx]);
+	else
+		pr_err("%s: tfa_stc dev %d - error %d\n",
+			__func__, idx, ret);
+
+	return ret;
+}
+
+static ssize_t sknt_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	int idx = tfa_get_dev_idx_from_inchannel(0);
+	int ret;
+	int value = 0;
+
+	ret = kstrtou32(buf, 10, &value);
+	if (!value) {
+		pr_info("%s: do nothing\n", __func__);
+		return -EINVAL;
+	}
+
+	ret = tfa98xx_write_sknt_control(idx, value);
+	if (!ret) {
+		pr_info("%s: tfa_stc - dev %d - surface temperature (%d)\n",
+			__func__, idx, value);
+		sknt_data[idx] = value;
+	} else {
+		pr_err("%s: tfa_stc dev %d - error %d\n",
+			__func__, idx, ret);
+	}
+
+	return size;
+}
+
+#if defined(TFA_STEREO_NODE)
+static ssize_t spkt_r_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	int idx = tfa_get_dev_idx_from_inchannel(1);
-	int value, size;
-	char pstate_result[FILESIZE_STC] = {0};
+	int value = 0, size;
+	char spkt_result[FILESIZE_STC] = {0};
 
-	value = tfa_get_power_state(idx);
-	pr_info("%s: tfa_stc - dev %d - power state (%d)\n",
+	value = tfa98xx_update_spkt_data(idx);
+	pr_info("%s: tfa_stc - dev %d - speaker temperature (%d)\n",
 		__func__, idx, value);
 
-	snprintf(pstate_result, FILESIZE_STC,
+	snprintf(spkt_result, FILESIZE_STC,
 		"%d", value);
 
-	if (pstate_result[0] == 0)
+	if (spkt_result[0] == 0)
 		size = snprintf(buf, 1 + 1, "0"); /* no data */
 	else
-		size = snprintf(buf, strlen(pstate_result) + 1,
-			"%s", pstate_result);
+		size = snprintf(buf, strlen(spkt_result) + 1,
+			"%s", spkt_result);
 
 	if (size <= 0) {
 		pr_err("%s: tfa_stc failed to show in sysfs file\n", __func__);
@@ -113,15 +204,58 @@ static ssize_t power_state_r_show(struct device *dev,
 	return size;
 }
 
-static ssize_t power_state_r_store(struct device *dev,
+static ssize_t spkt_r_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
-	pr_info("%s: dev %d - not allowed to write power state\n",
+	pr_info("%s: dev %d - not allowed to write speaker temperature\n",
 		__func__, tfa_get_dev_idx_from_inchannel(1));
 
 	return size;
 }
-#endif /* (CONFIG_TFA_STEREO_NODE) || (TFA_STEREO_NODE) */
+
+static ssize_t sknt_r_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int idx = tfa_get_dev_idx_from_inchannel(1);
+	int ret;
+
+	ret = update_sknt_control(idx, buf);
+	if (ret > 0)
+		pr_info("%s: tfa_stc - dev %d - surface temperature (%d)\n",
+			__func__, idx, sknt_data[idx]);
+	else
+		pr_err("%s: tfa_stc dev %d - error %d\n",
+			__func__, idx, ret);
+
+	return ret;
+}
+
+static ssize_t sknt_r_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	int idx = tfa_get_dev_idx_from_inchannel(1);
+	int ret;
+	int value = 0;
+
+	ret = kstrtou32(buf, 10, &value);
+	if (!value) {
+		pr_info("%s: do nothing\n", __func__);
+		return -EINVAL;
+	}
+
+	ret = tfa98xx_write_sknt_control(idx, value);
+	if (!ret) {
+		pr_info("%s: tfa_stc - dev %d - surface temperature (%d)\n",
+			__func__, idx, value);
+		sknt_data[idx] = value;
+	} else {
+		pr_err("%s: tfa_stc dev %d - error %d\n",
+			__func__, idx, ret);
+	}
+
+	return size;
+}
+#endif /* TFA_STEREO_NODE */
 
 int tfa98xx_stc_init(struct class *tfa_class)
 {

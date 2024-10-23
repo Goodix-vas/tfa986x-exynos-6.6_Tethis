@@ -5426,6 +5426,242 @@ int tfa_get_power_state(int index)
 }
 EXPORT_SYMBOL(tfa_get_power_state);
 
+int tfa98xx_update_spkt_data(int idx)
+{
+	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(0);
+	struct tfa98xx *tfa98xx;
+	int ret = 0;
+	int value[MAX_HANDLES] = {0};
+	int i, ndev, data = 0;
+	int pm = 0;
+
+	if (tfa == NULL)
+		return DEFAULT_REF_TEMP; /* unused device */
+	if (tfa->tfa_family == 0)
+		return DEFAULT_REF_TEMP;
+
+	if (tfa->active_handle > 0) {
+		pr_info("%s: switched to active handle - %d\n",
+			__func__, tfa->active_handle);
+		tfa = tfa98xx_get_tfa_device_from_index(tfa->active_handle);
+		if (tfa == NULL)
+			return DEFAULT_REF_TEMP;
+		if (tfa->tfa_family == 0)
+			return DEFAULT_REF_TEMP;
+	}
+
+	ndev = tfa->dev_count;
+#if !defined(TFA_STEREO_NODE)
+	if (ndev == 1 && idx > 0)
+		idx = 0; /* use device 0 in mono, by force */
+#endif
+	if ((ndev < 1)
+		|| (idx < 0 || idx >= ndev))
+		return DEFAULT_REF_TEMP;
+
+	if (tfa98xx_count_active_stream(BIT_PSTREAM) == 0) {
+		pr_info("%s: skipped - tfadsp is not active!\n",
+			__func__);
+		return DEFAULT_REF_TEMP;
+	}
+
+	if (tfa->is_bypass) {
+		pr_info("%s: skipped - tfadsp in bypass\n",
+			__func__);
+		return DEFAULT_REF_TEMP;
+	}
+
+	if (tfa->is_calibrating) {
+		pr_info("%s: skipped - tfadsp is running calibraion!\n",
+			__func__);
+		return DEFAULT_REF_TEMP;
+	}
+
+	pm = tfa_get_power_state(idx);
+	pr_info("%s: tfa_stc - dev %d - power state 0x%x\n",
+		__func__, idx, pm);
+
+	if (pm > 0) /* reset temperature in low power state */
+		return DEFAULT_REF_TEMP;
+
+	if (tfa->is_configured <= 0) {
+		pr_info("%s: skipped - tfadsp is not active\n",
+			__func__);
+		return DEFAULT_REF_TEMP;
+	}
+
+	pr_info("%s: tfa_stc - read tspkr for stc\n",
+		__func__);
+
+	tfa98xx = (struct tfa98xx *)tfa->data;
+
+	mutex_lock(&tfa98xx->dsp_lock);
+	ret = tfa_read_tspkr(tfa, value);
+	mutex_unlock(&tfa98xx->dsp_lock);
+	if (ret) {
+		pr_info("%s: tfa_stc failed to read data from amplifier\n",
+			__func__);
+		value[idx] = DEFAULT_REF_TEMP;
+	}
+	if (value[idx] == 0xffff) {
+		pr_info("%s: tfa_stc read wrong data from amplifier\n",
+			__func__);
+	}
+	data = value[idx];
+
+	for (i = 0; i < ndev; i++)
+		pr_debug("%s: data[%d]%s - %d\n", __func__, i,
+			(idx == i) ? "*" : "", value[i]);
+
+	return data;
+}
+EXPORT_SYMBOL(tfa98xx_update_spkt_data);
+
+int tfa98xx_update_spkt_data_channel(int channel)
+{
+	int idx = tfa_get_dev_idx_from_inchannel(channel);
+
+	return tfa98xx_update_spkt_data(idx);
+}
+EXPORT_SYMBOL(tfa98xx_update_spkt_data_channel);
+
+int tfa98xx_write_sknt_control(int idx, int value)
+{
+	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(0);
+	struct tfa98xx *tfa98xx;
+	int ret = 0;
+	int pm = 0;
+	int i, ndev, ready = 0;
+	static int data[MAX_HANDLES] = {
+		DEFAULT_REF_TEMP, DEFAULT_REF_TEMP,
+		DEFAULT_REF_TEMP, DEFAULT_REF_TEMP
+	};
+	static int update[MAX_HANDLES];
+	struct tfa_device *ntfa = tfa98xx_get_tfa_device_from_index(idx);
+	int group = 0;
+
+	if (tfa == NULL)
+		return -ENODEV;
+	if (tfa->tfa_family == 0)
+		return -ENODEV;
+
+	if (tfa->active_handle > 0) {
+		pr_info("%s: switched to active handle - %d\n",
+			__func__, tfa->active_handle);
+		tfa = tfa98xx_get_tfa_device_from_index(tfa->active_handle);
+		if (tfa == NULL)
+			return -ENODEV;
+		if (tfa->tfa_family == 0)
+			return -ENODEV;
+	}
+
+	ndev = tfa->dev_count;
+#if !defined(TFA_STEREO_NODE)
+	if (ndev == 1 && idx > 0)
+		idx = 0; /* use device 0 in mono, by force */
+#endif
+	if ((ndev < 1)
+		|| (idx < 0 || idx >= ndev))
+		return -EINVAL;
+
+	if (tfa98xx_count_active_stream(BIT_PSTREAM) == 0) {
+		pr_info("%s: skipped - no active stream!\n",
+			__func__);
+		goto tfa98xx_write_sknt_control_exit;
+	}
+
+	if (tfa->is_bypass) {
+		pr_info("%s: skipped - tfadsp in bypass\n",
+			__func__);
+		goto tfa98xx_write_sknt_control_exit;
+	}
+
+	if (tfa->is_calibrating) {
+		pr_info("%s: skipped - tfadsp is running calibraion!\n",
+			__func__);
+		goto tfa98xx_write_sknt_control_exit;
+	}
+
+	if (tfa->is_configured <= 0) {
+		pr_info("%s: skipped - tfadsp is not active\n",
+			__func__);
+		goto tfa98xx_write_sknt_control_exit;
+	}
+
+	if (tfa_is_active_device(ntfa)) {
+		group = idx * ID_BLACKBOX_MAX;
+		if (ntfa->log_data[group + ID_MAXTSURF_LOG]
+			< value)
+			ntfa->log_data[group + ID_MAXTSURF_LOG]
+				= value;
+		if (value > TSURFMAX)
+			ntfa->log_data[group + ID_OVERTSURFMAX_COUNT]++;
+	}
+
+	pm = tfa_get_power_state(idx);
+
+	pr_info("%s: tfa_stc - dev %d - set surface temperature (%d)\n",
+		__func__, idx, value);
+	if (update[idx])
+		pr_debug("%s: tfa_stc - dev %d - overwrite data\n",
+			__func__, idx);
+
+	data[idx] = value;
+	update[idx] = 1;
+
+	for (i = 0; i < ndev; i++) {
+		pm = tfa_get_power_state(i);
+		if (pm & 0x4) { /* count power down */
+			pr_info("%s: tfa_stc - dev %d: check power down\n",
+				__func__, i);
+			ready++;
+			data[i] = DEFAULT_REF_TEMP;
+			continue;
+		}
+		if (update[i] > 0)
+			ready++;
+	}
+
+	if (ready < ndev)
+		/* wait until all the active devices are ready */
+		return ret;
+
+	pr_info("%s: tfa_stc - write volume for stc\n",
+		__func__);
+
+	tfa98xx = (struct tfa98xx *)tfa->data;
+
+	mutex_lock(&tfa98xx->dsp_lock);
+	tfa->individual_msg = 1;
+	ret = tfa_write_volume(tfa, data);
+	mutex_unlock(&tfa98xx->dsp_lock);
+	if (ret) {
+		pr_info("%s: tfa_stc failed to write data to amplifier\n",
+			__func__);
+		goto tfa98xx_write_sknt_control_exit;
+	}
+
+	for (i = 0; i < ndev; i++)
+		pr_debug("%s: data[%d]%s - %d\n", __func__, i,
+			(update[i]) ? "*" : "", data[i]);
+
+tfa98xx_write_sknt_control_exit:
+	pr_info("%s: tfa_stc - reset update flags\n",
+		__func__);
+	memset(update, 0, ndev * sizeof(int));
+
+	return ret;
+}
+EXPORT_SYMBOL(tfa98xx_write_sknt_control);
+
+int tfa98xx_write_sknt_control_channel(int channel, int value)
+{
+	int idx = tfa_get_dev_idx_from_inchannel(channel);
+
+	return tfa98xx_write_sknt_control(idx, value);
+}
+EXPORT_SYMBOL(tfa98xx_write_sknt_control_channel);
+
 static int tfa98xx_i2c_probe(struct i2c_client *i2c)
 {
 	struct snd_soc_dai_driver *dai = NULL;

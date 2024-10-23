@@ -21,33 +21,40 @@ static ssize_t rdc_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size);
 static DEVICE_ATTR_RW(rdc);
 
-#if defined(CONFIG_TFA_STEREO_NODE) || defined(TFA_STEREO_NODE)
+static ssize_t temp_show(struct device *dev,
+	struct device_attribute *attr, char *buf);
+static ssize_t temp_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size);
+static DEVICE_ATTR_RW(temp);
+
+#if defined(TFA_STEREO_NODE)
 static ssize_t rdc_r_show(struct device *dev,
 	struct device_attribute *attr, char *buf);
 static ssize_t rdc_r_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size);
 static DEVICE_ATTR_RW(rdc_r);
-#endif /* (CONFIG_TFA_STEREO_NODE) || (TFA_STEREO_NODE) */
 
-static ssize_t ref_temp_show(struct device *dev,
+static ssize_t temp_r_show(struct device *dev,
 	struct device_attribute *attr, char *buf);
-static ssize_t ref_temp_store(struct device *dev,
+static ssize_t temp_r_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size);
-static DEVICE_ATTR_RW(ref_temp);
+static DEVICE_ATTR_RW(temp_r);
+#endif /* TFA_STEREO_NODE */
 
-static ssize_t config_show(struct device *dev,
+static ssize_t status_show(struct device *dev,
 	struct device_attribute *attr, char *buf);
-static ssize_t config_store(struct device *dev,
+static ssize_t status_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size);
-static DEVICE_ATTR(config, 0664, config_show, config_store);
+static DEVICE_ATTR_RW(status);
 
 static struct attribute *tfa_cal_attr[] = {
 	&dev_attr_rdc.attr,
-#if defined(CONFIG_TFA_STEREO_NODE) || defined(TFA_STEREO_NODE)
+	&dev_attr_temp.attr,
+#if defined(TFA_STEREO_NODE)
 	&dev_attr_rdc_r.attr,
-#endif /* (CONFIG_TFA_STEREO_NODE) || (TFA_STEREO_NODE) */
-	&dev_attr_ref_temp.attr,
-	&dev_attr_config.attr,
+	&dev_attr_temp_r.attr,
+#endif /* TFA_STEREO_NODE */
+	&dev_attr_status.attr,
 	NULL,
 };
 
@@ -68,22 +75,109 @@ static struct tfa_cal cal_data[MAX_HANDLES];
 
 /* ---------------------------------------------------------------------- */
 
-static ssize_t rdc_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
+static ssize_t update_rdc_status(int idx, char *buf)
 {
-	int idx = tfa_get_dev_idx_from_inchannel(0);
+	struct tfa_device *tfa = NULL;
+	int ret = 0;
+	uint16_t value;
+	int size;
 	char cal_result[FILESIZE_CAL] = {0};
-	int ret;
+
+	tfa = tfa98xx_get_tfa_device_from_index(0);
+	if (tfa == NULL)
+		return -EINVAL; /* unused device */
+
+	if (idx < 0 || idx >= tfa->dev_count)
+		return -EINVAL;
+
+	if (cal_data[idx].rdc == 0
+		|| cal_data[idx].rdc == 0xffff) {
+		ret = tfa_get_cal_data(idx, &value);
+		if (ret == TFA98XX_ERROR_NOT_OPEN)
+			value = 0xffff; /* unused device */
+		if (ret) {
+			pr_info("%s: tfa_cal failed to read data from amplifier\n",
+				__func__);
+			value = 0;
+		}
+		if (value == 0xffff)
+			pr_info("%s: tfa_cal read wrong data from amplifier\n",
+				__func__);
+		cal_data[idx].rdc = value;
+	}
 
 	snprintf(cal_result, FILESIZE_CAL,
 		"%d", cal_data[idx].rdc);
 
 	if (cal_result[0] == 0)
-		ret = snprintf(buf, 7 + 1, "no_data");
+		size = snprintf(buf, 7 + 1, "no_data");
 	else
-		ret = snprintf(buf, strlen(cal_result) + 1,
+		size = snprintf(buf, strlen(cal_result) + 1,
 			"%s", cal_result);
 
+	if (size <= 0) {
+		pr_err("%s: tfa_cal failed to show in sysfs file\n", __func__);
+		return -EINVAL;
+	}
+
+	return size;
+}
+
+static ssize_t update_temp_status(int idx, char *buf)
+{
+	struct tfa_device *tfa = NULL;
+	int ret = 0;
+	uint16_t value;
+	int size;
+	char cal_result[FILESIZE_CAL] = {0};
+
+	tfa = tfa98xx_get_tfa_device_from_index(0);
+	if (tfa == NULL)
+		return -EINVAL; /* unused device */
+
+	if (idx < 0 || idx >= tfa->dev_count)
+		return -EINVAL;
+
+	if (cal_data[idx].temp == 0
+		|| cal_data[idx].temp == 0xffff) {
+		ret = tfa_get_cal_temp(idx, &value);
+		if (ret == TFA98XX_ERROR_NOT_OPEN)
+			value = 0xffff; /* unused device */
+		if (ret) {
+			pr_info("%s: tfa_cal failed to read temp from amplifier\n",
+				__func__);
+			value = 0;
+		}
+		if (value == 0xffff)
+			pr_info("%s: tfa_cal read wrong temp from amplifier\n",
+				__func__);
+		cal_data[idx].temp = value;
+	}
+
+	snprintf(cal_result, FILESIZE_CAL,
+		"%d", cal_data[idx].temp);
+
+	if (cal_result[0] == 0)
+		size = snprintf(buf, 7 + 1, "no_data");
+	else
+		size = snprintf(buf, strlen(cal_result) + 1,
+			"%s", cal_result);
+
+	if (size <= 0) {
+		pr_err("%s: tfa_cal failed to show in sysfs file\n", __func__);
+		return -EINVAL;
+	}
+
+	return size;
+}
+
+static ssize_t rdc_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int idx = tfa_get_dev_idx_from_inchannel(0);
+	int ret;
+
+	ret = update_rdc_status(idx, buf);
 	if (ret > 0)
 		pr_info("%s: tfa_cal - dev %d - calibration data (rdc %d)\n",
 			__func__, idx, cal_data[idx].rdc);
@@ -102,34 +196,54 @@ static ssize_t rdc_store(struct device *dev,
 
 	ret = kstrtou32(buf, 10, &value);
 	if (ret < 0) {
-		pr_info("%s: wrong value: %s\n", __func__, buf);
+		pr_info("%s: wronmg value: %s\n", __func__, buf);
 		return -EINVAL;
 	}
 
-	cal_data[idx].rdc = value;
-	pr_info("%s: tfa_cal - dev %d - calibration data (rdc %d)\n",
-		__func__, idx, value);
+	ret = tfa_set_cal_data(idx, value);
+	if (!ret) {
+		cal_data[idx].rdc = value;
+		pr_info("%s: tfa_cal - dev %d - calibration data (rdc %d)\n",
+			__func__, idx, value);
+	}
 
 	return size;
 }
 
-#if defined(CONFIG_TFA_STEREO_NODE) || defined(TFA_STEREO_NODE)
+static ssize_t temp_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int idx = tfa_get_dev_idx_from_inchannel(0);
+	int ret;
+
+	ret = update_temp_status(idx, buf);
+	if (ret > 0)
+		pr_info("%s: tfa_cal - dev %d - calibration data (temp %d)\n",
+			__func__, idx, cal_data[idx].temp);
+	else
+		pr_err("%s: tfa_cal dev %d - error %d\n",
+			__func__, idx, ret);
+
+	return ret;
+}
+
+static ssize_t temp_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	pr_info("%s: dev %d - not allowed to write temperature in calibration\n",
+		__func__, tfa_get_dev_idx_from_inchannel(0));
+
+	return size;
+}
+
+#if defined(TFA_STEREO_NODE)
 static ssize_t rdc_r_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	int idx = tfa_get_dev_idx_from_inchannel(1);
-	char cal_result[FILESIZE_CAL] = {0};
 	int ret;
 
-	snprintf(cal_result, FILESIZE_CAL,
-		"%d", cal_data[idx].rdc);
-
-	if (cal_result[0] == 0)
-		ret = snprintf(buf, 7 + 1, "no_data");
-	else
-		ret = snprintf(buf, strlen(cal_result) + 1,
-			"%s", cal_result);
-
+	ret = update_rdc_status(idx, buf);
 	if (ret > 0)
 		pr_info("%s: tfa_cal - dev %d - calibration data (rdc %d)\n",
 			__func__, idx, cal_data[idx].rdc);
@@ -148,60 +262,48 @@ static ssize_t rdc_r_store(struct device *dev,
 
 	ret = kstrtou32(buf, 10, &value);
 	if (ret < 0) {
-		pr_info("%s: wrong value: %s\n", __func__, buf);
+		pr_info("%s: wronmg value: %s\n", __func__, buf);
 		return -EINVAL;
 	}
 
-	cal_data[idx].rdc = value;
-	pr_info("%s: tfa_cal - dev %d - calibration data (rdc %d)\n",
-		__func__, idx, value);
+	ret = tfa_set_cal_data(idx, value);
+	if (!ret) {
+		cal_data[idx].rdc = value;
+		pr_info("%s: tfa_cal - dev %d - calibration data (rdc %d)\n",
+			__func__, idx, value);
+	}
 
 	return size;
 }
-#endif /* (CONFIG_TFA_STEREO_NODE) || (TFA_STEREO_NODE) */
 
-static ssize_t ref_temp_show(struct device *dev,
+static ssize_t temp_r_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	u16 temp_val = DEFAULT_REF_TEMP;
-	char cal_result[FILESIZE_CAL] = {0};
-	int size;
-	enum tfa98xx_error ret;
+	int idx = tfa_get_dev_idx_from_inchannel(1);
+	int ret;
 
-	/* EXT_TEMP */
-	ret = tfa98xx_read_reference_temp(&temp_val);
-	if (ret)
-		pr_err("error in reading reference temp\n");
-
-	snprintf(cal_result, FILESIZE_CAL,
-		"%d", temp_val);
-
-	if (cal_result[0] == 0)
-		size = snprintf(buf, 7 + 1, "no_data");
+	ret = update_temp_status(idx, buf);
+	if (ret > 0)
+		pr_info("%s: tfa_cal - dev %d - calibration data (temp %d)\n",
+			__func__, idx, cal_data[idx].temp);
 	else
-		size = snprintf(buf, strlen(cal_result) + 1,
-			"%s", cal_result);
+		pr_err("%s: tfa_cal dev %d - error %d\n",
+			__func__, idx, ret);
 
-	if (size > 0)
-		pr_info("%s: tfa_cal - ref_temp %d for calibration\n",
-			__func__, temp_val);
-	else
-		pr_err("%s: tfa_cal - ref_temp error\n",
-			__func__);
-
-	return size;
+	return ret;
 }
 
-static ssize_t ref_temp_store(struct device *dev,
+static ssize_t temp_r_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
-	pr_info("%s: not allowed to write temperature for calibration\n",
-		__func__);
+	pr_info("%s: dev %d - not allowed to write temperature in calibration\n",
+		__func__, tfa_get_dev_idx_from_inchannel(1));
 
 	return size;
 }
+#endif /* TFA_STEREO_NODE */
 
-static ssize_t config_show(struct device *dev,
+static ssize_t status_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	int size;
@@ -209,8 +311,8 @@ static ssize_t config_show(struct device *dev,
 
 	snprintf(cal_state, FILESIZE_CAL,
 		"%s", cur_status ?
-		"configured" /* calibration is active */
-		: "not configured"); /* calibration is inactive */
+		"enabled" /* calibration is active */
+		: "disabled"); /* calibration is inactive */
 
 	size = snprintf(buf, strlen(cal_state) + 1,
 		"%s", cal_state);
@@ -218,47 +320,92 @@ static ssize_t config_show(struct device *dev,
 	return size;
 }
 
-static ssize_t config_store(struct device *dev,
+static ssize_t status_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
+	struct tfa_device *tfa = NULL;
+	int idx, ndev = MAX_HANDLES;
+	uint16_t value;
 	int ret = 0, status;
 
 	/* Compare string, excluding the trailing \0 and the potentials eol */
-	if (!sysfs_streq(buf, "1") && !sysfs_streq(buf, "0")
-		 && !sysfs_streq(buf, "-1")) {
-		pr_info("%s: tfa_cal invalid value to configure calibration\n",
+	if (!sysfs_streq(buf, "1") && !sysfs_streq(buf, "0")) {
+		pr_info("%s: tfa_cal invalid value to start calibration\n",
 			__func__);
 		return -EINVAL;
 	}
 
 	ret = kstrtou32(buf, 10, &status);
-	if (status != 1) {
-		pr_info("%s: tfa_cal to restore setting after calibration\n",
-			__func__);
-		cur_status = 0; /* done - changed to inactive */
-		tfa_restore_after_cal(0, status);
+	if (!status) {
+		pr_info("%s: do nothing\n", __func__);
 		return -EINVAL;
 	}
 	if (cur_status)
-		pr_info("%s: tfa_cal already configured\n", __func__);
+		pr_info("%s: tfa_cal prior calibration still runs\n", __func__);
 
-	pr_info("%s: tfa_cal triggered\n", __func__);
+	pr_info("%s: tfa_cal begin\n", __func__);
+
+	cur_status = status; /* run - changed to active */
 
 	memset(cal_data, 0, sizeof(struct tfa_cal) * MAX_HANDLES);
 
-	/* configure registers for calibration */
-	ret = tfa_run_cal(0, NULL);
-	if (ret != TFA98XX_ERROR_FAIL) {
-		pr_info("%s: tfa_cal configured\n", __func__);
-		cur_status = status; /* run - changed to active */
-
-		return size;
+	/* run calibration */
+	ret = tfa_run_cal(0, &value);
+	if (ret == TFA98XX_ERROR_NOT_OPEN)
+		return -EINVAL; /* unused device */
+	if (ret) {
+		pr_info("%s: tfa_cal failed to calibrate speaker\n", __func__);
+		return -EINVAL;
 	}
 
-	pr_info("%s: tfa_cal failed to calibrate speaker\n", __func__);
 	cur_status = 0; /* done - changed to inactive */
 
-	return -EINVAL;
+	tfa = tfa98xx_get_tfa_device_from_index(0);
+	if (tfa == NULL)
+		return -EINVAL; /* unused device */
+
+	ndev = tfa->dev_count;
+	if (ndev < 1)
+		return -EINVAL;
+
+	for (idx = 0; idx < ndev; idx++) {
+		/* read data to store */
+		ret = tfa_get_cal_data(idx, &value);
+		if (ret) {
+			pr_info("%s: tfa_cal failed to read data after calibration\n",
+				__func__);
+			continue;
+		}
+
+		if (value == 0xffff) {
+			pr_info("%s: tfa_cal invalid data\n", __func__);
+			return -EINVAL;
+		}
+
+		cal_data[idx].rdc = value;
+
+		/* read temp to store */
+		ret = tfa_get_cal_temp(idx, &value);
+		if (ret) {
+			pr_info("%s: tfa_cal failed to read temp after calibration\n",
+				__func__);
+			continue;
+		}
+
+		if (value == 0xffff) {
+			pr_info("%s: tfa_cal invalid data\n", __func__);
+			return -EINVAL;
+		}
+
+		cal_data[idx].temp = value;
+
+		pr_info("%s: tfa_cal - dev %d - calibration data (%d, %d)\n",
+			__func__, idx, cal_data[idx].rdc, cal_data[idx].temp);
+	}
+
+	pr_info("%s: tfa_cal end\n", __func__);
+
+	return size;
 }
 
 int tfa98xx_cal_init(struct class *tfa_class)
