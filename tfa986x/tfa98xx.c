@@ -1815,7 +1815,8 @@ static int get_profile_from_list(char *buf, int id)
 
 	list_for_each_entry(bprof, &profile_list, list) {
 		if (bprof->item_id == id) {
-			strlcpy(buf, bprof->basename, MAX_CONTROL_NAME);
+			memset(buf, 0, MAX_CONTROL_NAME);
+			strncpy(buf, bprof->basename, MAX_CONTROL_NAME);
 			return 0;
 		}
 	}
@@ -1970,7 +1971,8 @@ static int tfa98xx_info_profile(struct snd_kcontrol *kcontrol,
 	if (err != 0)
 		return -EINVAL;
 
-	strlcpy(uinfo->value.enumerated.name,
+	memset(uinfo->value.enumerated.name, 0, MAX_CONTROL_NAME);
+	strncpy(uinfo->value.enumerated.name,
 		profile_name, MAX_CONTROL_NAME);
 
 	return 0;
@@ -2662,10 +2664,17 @@ static int tfa98xx_set_cnt_reload(struct snd_kcontrol *kcontrol,
 		tries = 0;
 
 		do {
+#if KERNEL_VERSION(5, 15, 0) <= LINUX_VERSION_CODE
 			ret = request_firmware_nowait(THIS_MODULE,
 				FW_ACTION_UEVENT,
 				fw_name, tfa98xx->dev, GFP_KERNEL,
 				tfa98xx, tfa98xx_container_loaded);
+#else
+			ret = request_firmware_nowait(THIS_MODULE,
+				FW_ACTION_HOTPLUG,
+				fw_name, tfa98xx->dev, GFP_KERNEL,
+				tfa98xx, tfa98xx_container_loaded);
+#endif
 			/* wait until driver completes loading */
 			msleep_interruptible(20);
 			if (tfa98xx->dsp_fw_state == TFA98XX_DSP_FW_OK)
@@ -3526,10 +3535,17 @@ static int tfa98xx_load_container(struct tfa98xx *tfa98xx)
 	mutex_unlock(&probe_lock);
 
 	do {
+#if KERNEL_VERSION(5, 15, 0) <= LINUX_VERSION_CODE
 		ret = request_firmware_nowait(THIS_MODULE,
 			FW_ACTION_UEVENT,
 			fw_name, tfa98xx->dev, GFP_KERNEL,
 			tfa98xx, tfa98xx_container_loaded);
+#else
+		ret = request_firmware_nowait(THIS_MODULE,
+			FW_ACTION_HOTPLUG,
+			fw_name, tfa98xx->dev, GFP_KERNEL,
+			tfa98xx, tfa98xx_container_loaded);	
+#endif
 		/* wait until driver completes loading */
 		msleep_interruptible(20);
 		if (tfa98xx->dsp_fw_state == TFA98XX_DSP_FW_OK)
@@ -4225,10 +4241,17 @@ static struct snd_soc_dai_driver tfa98xx_dai[] = {
 			.rates = TFA98XX_RATES,
 			.formats = TFA98XX_FORMATS,
 		},
+#if KERNEL_VERSION(5, 15, 0) <= LINUX_VERSION_CODE
 		.ops = &tfa98xx_dai_ops,
 		.symmetric_rate = 1,
 		.symmetric_channels = 0,
 		.symmetric_sample_bits = 0,
+#else
+		.ops = &tfa98xx_dai_ops,
+		.symmetric_rates = 1,
+		.symmetric_channels = 0,
+		.symmetric_samplebits = 0,
+#endif
 	},
 };
 
@@ -5237,6 +5260,8 @@ enum tfa98xx_error tfa_run_cal(int index, uint16_t *value)
 	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(index);
 	struct tfa98xx *tfa98xx;
 	int ret = 0;
+	int mtpex = 0, cal_result = 0;
+	int tries = 0;
 
 	if (!tfa)
 		return TFA98XX_ERROR_NOT_OPEN;
@@ -5250,9 +5275,150 @@ enum tfa98xx_error tfa_run_cal(int index, uint16_t *value)
 	if (ret < 0)
 		return TFA98XX_ERROR_FAIL;
 
+	tfa_wait_until_calibration_done(tfa);
+
+	if (value == NULL)
+		return TFA98XX_ERROR_BAD_PARAMETER;
+
+	while (tries < TFA98XX_API_REWRTIE_MTP_NTRIES) {
+		msleep_interruptible(CAL_STATUS_INTERVAL);
+		mtpex = tfa_dev_mtp_get(tfa, TFA_MTP_EX);
+		if (mtpex != 0) {
+			msleep_interruptible(CAL_STATUS_INTERVAL);
+			break;
+		}
+		tries++;
+	}
+	mtpex = tfa_dev_mtp_get(tfa, TFA_MTP_EX);
+	if (mtpex != 1)
+		return TFA98XX_ERROR_FAIL;
+
+	cal_result = tfa_dev_mtp_get(tfa, TFA_MTP_RE25);
+	*value = (uint16_t)cal_result;
+	if (cal_result < 0) {
+		pr_info("%s: calibration data is not valid\n",
+			__func__);
+		*value = 0xffff;
+		tfa->temp = 0xffff;
+		return TFA98XX_ERROR_FAIL;
+	}
+
 	return TFA98XX_ERROR_OK;
 }
 EXPORT_SYMBOL(tfa_run_cal);
+
+enum tfa98xx_error tfa_get_cal_data(int index, uint16_t *value)
+{
+	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(index);
+	int mtp = 0, mtpex = 0;
+
+	if (!tfa)
+		return TFA98XX_ERROR_NOT_OPEN;
+
+	mtp = tfa_dev_mtp_get(tfa, TFA_MTP_RE25);
+	mtpex = tfa_dev_mtp_get(tfa, TFA_MTP_EX);
+
+	if (value == NULL)
+		return TFA98XX_ERROR_BAD_PARAMETER;
+	if (mtpex != 1)
+		return TFA98XX_ERROR_FAIL;
+
+	*value = (uint16_t)mtp;
+	if (mtp < 0) {
+		pr_info("%s: calibration data is not valid\n",
+			__func__);
+		*value = 0xffff;
+		tfa->temp = 0xffff;
+		return TFA98XX_ERROR_FAIL;
+	}
+
+	return TFA98XX_ERROR_OK;
+}
+EXPORT_SYMBOL(tfa_get_cal_data);
+
+enum tfa98xx_error tfa_get_cal_data_channel(int channel, uint16_t *value)
+{
+	int index = tfa_get_dev_idx_from_inchannel(channel);
+
+	if (index < 0 || index >= MAX_HANDLES)
+		return TFA98XX_ERROR_FAIL;
+
+	return tfa_get_cal_data(index, value);
+}
+EXPORT_SYMBOL(tfa_get_cal_data_channel);
+
+enum tfa98xx_error tfa_set_cal_data(int index, uint16_t value)
+{
+	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(index);
+	enum tfa_error err = tfa_error_ok;
+
+	if (!tfa)
+		return TFA98XX_ERROR_NOT_OPEN;
+
+	err = tfa_dev_mtp_set(tfa, TFA_MTP_RE25, value);
+	if (err != tfa_error_ok)
+		return TFA98XX_ERROR_FAIL;
+
+	if (value > 0) {
+		err = tfa_dev_mtp_set(tfa, TFA_MTP_EX, 1);
+		if (err != tfa_error_ok)
+			return TFA98XX_ERROR_FAIL;
+	}
+
+	return TFA98XX_ERROR_OK;
+}
+EXPORT_SYMBOL(tfa_set_cal_data);
+
+enum tfa98xx_error tfa_set_cal_data_channel(int channel, uint16_t value)
+{
+	int index = tfa_get_dev_idx_from_inchannel(channel);
+
+	if (index < 0 || index >= MAX_HANDLES)
+		return TFA98XX_ERROR_FAIL;
+
+	return tfa_set_cal_data(index, value);
+}
+EXPORT_SYMBOL(tfa_set_cal_data_channel);
+
+enum tfa98xx_error tfa_get_cal_temp(int index, uint16_t *value)
+{
+	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(index);
+	int mtpex = 0;
+
+	if (!tfa)
+		return TFA98XX_ERROR_NOT_OPEN;
+
+	mtpex = tfa_dev_mtp_get(tfa, TFA_MTP_EX);
+
+	if (value == NULL)
+		return TFA98XX_ERROR_BAD_PARAMETER;
+	if (mtpex != 1)
+		return TFA98XX_ERROR_FAIL;
+
+	*value = tfa->temp;
+	if (*value == 0xffff) {
+		pr_info("%s: calibration temperature is not valid\n",
+			__func__);
+		*value = tfa98xx_get_exttemp(tfa);
+		pr_info("%s: calibration temperature is not valid\n",
+			__func__);
+		return TFA98XX_ERROR_FAIL;
+	}
+
+	return TFA98XX_ERROR_OK;
+}
+EXPORT_SYMBOL(tfa_get_cal_temp);
+
+enum tfa98xx_error tfa_get_cal_temp_channel(int channel, uint16_t *value)
+{
+	int index = tfa_get_dev_idx_from_inchannel(channel);
+
+	if (index < 0 || index >= MAX_HANDLES)
+		return TFA98XX_ERROR_FAIL;
+
+	return tfa_get_cal_temp(index, value);
+}
+EXPORT_SYMBOL(tfa_get_cal_temp_channel);
 
 int tfa98xx_set_blackbox(int enable)
 {
@@ -5537,8 +5703,10 @@ int tfa98xx_write_sknt_control(int idx, int value)
 		DEFAULT_REF_TEMP, DEFAULT_REF_TEMP
 	};
 	static int update[MAX_HANDLES];
+#if 0 // [TODO]
 	struct tfa_device *ntfa = tfa98xx_get_tfa_device_from_index(idx);
 	int group = 0;
+#endif
 
 	if (tfa == NULL)
 		return -ENODEV;
@@ -5588,6 +5756,7 @@ int tfa98xx_write_sknt_control(int idx, int value)
 		goto tfa98xx_write_sknt_control_exit;
 	}
 
+#if 0 // [TODO]
 	if (tfa_is_active_device(ntfa)) {
 		group = idx * ID_BLACKBOX_MAX;
 		if (ntfa->log_data[group + ID_MAXTSURF_LOG]
@@ -5597,6 +5766,7 @@ int tfa98xx_write_sknt_control(int idx, int value)
 		if (value > TSURFMAX)
 			ntfa->log_data[group + ID_OVERTSURFMAX_COUNT]++;
 	}
+#endif
 
 	pm = tfa_get_power_state(idx);
 
@@ -5662,7 +5832,12 @@ int tfa98xx_write_sknt_control_channel(int channel, int value)
 }
 EXPORT_SYMBOL(tfa98xx_write_sknt_control_channel);
 
+#if KERNEL_VERSION(6, 6, 0) <= LINUX_VERSION_CODE
 static int tfa98xx_i2c_probe(struct i2c_client *i2c)
+#else
+static int tfa98xx_i2c_probe(struct i2c_client *i2c,
+	const struct i2c_device_id *id)
+#endif
 {
 	struct snd_soc_dai_driver *dai = NULL;
 	struct tfa98xx *tfa98xx = NULL;
@@ -5735,8 +5910,14 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c)
 	}
 
 	if (gpio_is_valid(tfa98xx->irq_gpio)) {
+#if KERNEL_VERSION(6, 12, 0) <= LINUX_VERSION_CODE
+		ret = gpio_request_one((unsigned int)tfa98xx->irq_gpio,
+			GPIOF_IN, "TFA98XX_INT");
+
+#else
 		ret = gpio_request_one((unsigned int)tfa98xx->irq_gpio,
 			GPIOF_DIR_IN, "TFA98XX_INT");
+#endif
 		if (ret)
 			tfa98xx->irq_gpio = -1;
 	}
@@ -5971,14 +6152,20 @@ tfa98xx_i2c_probe_fail:
 	return ret;
 }
 
+#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 static void tfa98xx_i2c_remove(struct i2c_client *i2c)
+#else
+static int tfa98xx_i2c_remove(struct i2c_client *i2c)
+#endif
 {
 	struct tfa98xx *tfa98xx = i2c_get_clientdata(i2c);
 
 	pr_debug("addr=0x%x\n", i2c->addr);
 
+#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 	if (tfa98xx == NULL)
 		return;
+#endif
 
 	tfa98xx_interrupt_enable(tfa98xx, false);
 
@@ -6013,6 +6200,9 @@ static void tfa98xx_i2c_remove(struct i2c_client *i2c)
 
 	i2c_set_clientdata(i2c, NULL);
 	mutex_unlock(&tfa98xx_mutex);
+#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
+	return 0;
+#endif
 }
 
 static const struct i2c_device_id tfa98xx_i2c_id[] = {
@@ -6052,12 +6242,20 @@ static int __init tfa98xx_i2c_init(void)
 
 	/* Initialize kmem_cache */
 	/* Cache name /proc/slabinfo */
+#if KERNEL_VERSION(6, 12, 0) <= LINUX_VERSION_CODE
+	tfa98xx_cache = kmem_cache_create("tfa98xx_cache",
+		PAGE_SIZE, /* Structure size, we should fit in single page */
+		0, /* Structure alignment */
+		(SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT), /*Cache property  */ 
+		NULL); /* Object constructor */
+#else
 	tfa98xx_cache = kmem_cache_create("tfa98xx_cache",
 		PAGE_SIZE, /* Structure size, we should fit in single page */
 		0, /* Structure alignment */
 		(SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT |
 		SLAB_MEM_SPREAD), /* Cache property */
 		NULL); /* Object constructor */
+#endif
 	if (!tfa98xx_cache) {
 		pr_err("tfa98xx can't create memory pool\n");
 		ret = -ENOMEM;

@@ -674,6 +674,9 @@ void tfa_set_status_flag(struct tfa_device *tfa, int type, int value);
 
 void tfa_set_query_info(struct tfa_device *tfa);
 
+int tfa_get_pga_gain(struct tfa_device *tfa);
+int tfa_set_pga_gain(struct tfa_device *tfa, uint16_t value);
+
 int tfa_reset_sticky_bits(struct tfa_device *tfa);
 
 /*
@@ -699,6 +702,10 @@ int tfa_wait4manstate(struct tfa_device *tfa,
  * function overload for flag_mtp_busy
  */
 int tfa_dev_get_mtpb(struct tfa_device *tfa);
+
+enum tfa98xx_error tfa_read_tspkr(struct tfa_device *tfa, int *spkt);
+
+enum tfa98xx_error tfa_write_volume(struct tfa_device *tfa, int *sknt);
 
 #ifdef __cplusplus
 }

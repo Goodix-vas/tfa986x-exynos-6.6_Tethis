@@ -1862,7 +1862,8 @@ int tfa_cont_get_cal_profile(struct tfa_device *tfa)
 
 	/* search for the calibration profile in the list of profiles */
 	for (prof = 0; prof < tfa->cnt->nprof; prof++) {
-		strlcpy(prof_name, tfa_cont_profile_name(tfa->cnt,
+		memset(prof_name, 0, MAX_CONTROL_NAME);
+		strncpy(prof_name, tfa_cont_profile_name(tfa->cnt,
 			tfa->dev_idx, prof), MAX_CONTROL_NAME);
 		if (strnstr(prof_name, ".cal", strlen(prof_name)) != NULL) {
 			cal_idx = prof;
@@ -1891,7 +1892,8 @@ int tfa_cont_is_standby_profile(struct tfa_device *tfa, int prof_idx)
 	if ((tfa->dev_idx < 0) || (tfa->dev_idx >= tfa->cnt->ndev))
 		return TFA_ERROR;
 
-	strlcpy(prof_name, tfa_cont_profile_name(tfa->cnt,
+	memset(prof_name, 0, MAX_CONTROL_NAME);
+	strncpy(prof_name, tfa_cont_profile_name(tfa->cnt,
 		tfa->dev_idx, prof_idx), MAX_CONTROL_NAME);
 	/* Check if next profile is standby profile */
 	if (strnstr(prof_name, ".standby", strlen(prof_name)) != NULL) {

@@ -78,6 +78,12 @@ void tfa_set_spkgain(struct tfa_device *tfa);
 
 void tfa_restore_after_cal(int index, int cal_err);
 enum tfa98xx_error tfa_run_cal(int index, uint16_t *value);
+enum tfa98xx_error tfa_get_cal_data(int index, uint16_t *value);
+enum tfa98xx_error tfa_get_cal_data_channel(int channel, uint16_t *value);
+enum tfa98xx_error tfa_set_cal_data(int index, uint16_t value);
+enum tfa98xx_error tfa_set_cal_data_channel(int channel, uint16_t value);
+enum tfa98xx_error tfa_get_cal_temp(int index, uint16_t *value);
+enum tfa98xx_error tfa_get_cal_temp_channel(int channel, uint16_t *value);
 
 int tfa_set_blackbox(int enable);
 enum tfa98xx_error tfa_configure_log(int enable);
@@ -86,6 +92,12 @@ enum tfa98xx_error tfa_update_log(void);
 int tfa_get_power_state(int index);
 
 int tfa_wait_until_calibration_done(struct tfa_device *tfa);
+
+enum tfa98xx_error tfa98xx_faim_protect(struct tfa_device *tfa, int state);
+
+enum tfa98xx_error tfa98xx_set_osc_powerdown(struct tfa_device *tfa, int state);
+
+enum tfa98xx_error tfa98xx_update_lpm(struct tfa_device *tfa, int state);
 
 #endif /* __TFA_INTERNAL_H__ */
 

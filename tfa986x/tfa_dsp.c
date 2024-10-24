@@ -2488,7 +2488,8 @@ enum tfa98xx_error tfa_run_startup(struct tfa_device *tfa, int profile)
 	}
 
 	/* Go to the initCF state */
-	strlcpy(prof_name, tfa_cont_profile_name(tfa->cnt,
+	memset(prof_name, 0, MAX_CONTROL_NAME);
+	strncpy(prof_name, tfa_cont_profile_name(tfa->cnt,
 		tfa->dev_idx, profile), MAX_CONTROL_NAME);
 	tfa_dev_set_state(tfa, TFA_STATE_INIT_CF,
 		strnstr(prof_name, ".cal", strlen(prof_name)) != NULL);
@@ -4773,5 +4774,147 @@ enum tfa98xx_error tfa_update_log(void)
 	}
 
 	return err;
+}
+
+#define TEMP_INDEX	0
+enum tfa98xx_error tfa_read_tspkr(struct tfa_device *tfa, int *spkt)
+{
+	enum tfa98xx_error error = TFA98XX_ERROR_OK;
+	struct tfa_device *ntfa = NULL;
+	unsigned char bytes[(TEMP_INDEX + 2) * 3] = {0};
+	int channel = 0;
+	int data[TEMP_INDEX + 2];
+	int nr_bytes, i, spkr_count = 0;
+
+	if (tfa_count_status_flag(tfa, TFA_SET_DEVICE) != 0
+		|| tfa_count_status_flag(tfa, TFA_SET_CONFIG) != 0) {
+		pr_info("%s: skip if device is being configured\n", __func__);
+		return TFA98XX_ERROR_DSP_NOT_RUNNING;
+	}
+
+	error = tfa_supported_speakers(tfa, &spkr_count);
+	if (error != TFA98XX_ERROR_OK) {
+		pr_err("error in checking supported speakers\n");
+		return error;
+	}
+
+	/* SoftDSP interface differs from hw-dsp interfaces */
+	if (tfa->is_probus_device && tfa->dev_count > 1)
+		spkr_count = tfa->dev_count;
+
+	nr_bytes = (TEMP_INDEX + spkr_count) * 3;
+
+	pr_info("%s: read SB_PARAM_GET_TSPKR\n", __func__);
+	error = tfa_dsp_cmd_id_write_read(tfa,
+		MODULE_SPEAKERBOOST,
+		SB_PARAM_GET_TSPKR, nr_bytes, bytes);
+
+	if (error != TFA98XX_ERROR_OK) {
+		pr_info("%s: failure in reading speaker temperature (err %d)\n",
+			__func__, error);
+		return error;
+	}
+
+	tfa98xx_convert_bytes2data(nr_bytes, bytes, data);
+
+	pr_debug("%s: SPKR_TEMP - spkr_count %d, dev_count %d\n",
+		__func__, spkr_count, tfa->dev_count);
+	pr_debug("%s: SPKR_TEMP - data[0]=%d, data[1]=%d\n",
+		__func__, data[TEMP_INDEX], data[TEMP_INDEX + 1]);
+
+	/* real-time t (degC) */
+	for (i = 0; i < tfa->dev_count; i++) {
+		ntfa = tfa98xx_get_tfa_device_from_index(i);
+
+		if (!tfa_is_active_device(ntfa)) {
+			spkt[i] = 0xffff; /* inactive */
+			continue;
+		}
+
+		channel = tfa_get_channel_from_dev_idx(ntfa, -1);
+		if (channel == -1) {
+			spkt[i] = 0xffff; /* invalid channel */
+			continue;
+		}
+
+		spkt[i] = (int)(data[TEMP_INDEX + channel]
+			/ TFA2_FW_T_DATA_SCALE);
+	}
+
+	return error;
+}
+
+enum tfa98xx_error tfa_write_volume(struct tfa_device *tfa, int *sknt)
+{
+	enum tfa98xx_error error = TFA98XX_ERROR_OK;
+	int i, spkr_count = 0;
+	int active_channel = -1, channel = 0;
+	int stcontrol[MAX_CHANNELS] = {0};
+	unsigned char bytes[2 * 3] = {0};
+	int data = 0;
+
+	if (tfa_count_status_flag(tfa, TFA_SET_DEVICE) != 0
+		|| tfa_count_status_flag(tfa, TFA_SET_CONFIG) != 0) {
+		pr_info("%s: skip if device is being configured\n", __func__);
+		return TFA98XX_ERROR_DSP_NOT_RUNNING;
+	}
+
+	error = tfa_supported_speakers(tfa, &spkr_count);
+	if (error != TFA98XX_ERROR_OK) {
+		pr_err("error in checking supported speakers\n");
+		return error;
+	}
+
+	/* SoftDSP interface differs from hw-dsp interfaces */
+	if (tfa->is_probus_device && tfa->dev_count > 1)
+		spkr_count = tfa->dev_count;
+
+	if (sknt == NULL) {
+		pr_info("%s: reset surface temperature control\n",
+			__func__);
+	} else {
+		/* map surface temperature per channel */
+		for (i = 0; i < spkr_count; i++) {
+			channel = tfa_get_channel_from_dev_idx(NULL, i);
+			if (channel != -1)
+				stcontrol[channel] = sknt[i];
+		}
+	}
+
+	if (tfa->dev_count == 1) /* mono: duplicate channel 0 */
+		active_channel = 0;
+	else if (tfa->dev_count >= 2) /* stereo and beyond */
+		active_channel = tfa_get_channel_from_dev_idx(NULL,
+			tfa->active_handle); /* -1 if active_handle == -1 */
+
+	if (active_channel != -1) {
+		pr_info("%s: copy vol from active dev %d (channel %d)\n",
+			__func__, tfa->active_handle,
+			active_channel);
+		for (i = 0; i < MAX_CHANNELS; i++)
+			stcontrol[i] = stcontrol[active_channel];
+	}
+
+	for (i = 0; i < MAX_CHANNELS; i++) {
+		pr_info("%s: dev %d - surface temperature (%d)\n",
+			__func__, i, stcontrol[i]);
+		data = (int)stcontrol[i]; /* send value directly */
+
+		bytes[i * 3] = (uint8_t)((data >> 16) & 0xffff);
+		bytes[i * 3 + 1] = (uint8_t)((data >> 8) & 0xff);
+		bytes[i * 3 + 2] = (uint8_t)(data & 0xff);
+	}
+
+	tfa->individual_msg = 1;
+
+	pr_info("%s: write CUSTOM_PARAM_SET_TSURF\n", __func__);
+	error = tfa_dsp_cmd_id_write
+		(tfa, MODULE_CUSTOM, CUSTOM_PARAM_SET_TSURF,
+		sizeof(bytes), bytes);
+	if (error != TFA98XX_ERROR_OK)
+		pr_info("%s: failure in writing surface temperature (err %d)\n",
+			__func__, error);
+
+	return error;
 }
 

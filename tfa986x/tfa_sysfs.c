@@ -8,6 +8,7 @@
  *
  */
 
+#include <linux/version.h>	
 #include "inc/tfa_sysfs.h"
 
 static struct class *g_tfa_class;
@@ -17,7 +18,11 @@ static int __init tfa98xx_sysfs_init(void)
 	int ret = 0;
 
 	if (!g_tfa_class)
+#if KERNEL_VERSION(6, 6, 0) <= LINUX_VERSION_CODE
 		g_tfa_class = class_create(TFA_CLASS_NAME);
+#else
+		g_tfa_class = class_create(THIS_MODULE, TFA_CLASS_NAME);
+#endif
 
 	pr_info("%s: g_tfa_class=%p\n", __func__, g_tfa_class);
 	pr_info("%s: initialized\n", __func__);

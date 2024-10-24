@@ -127,7 +127,7 @@ static enum tfa98xx_error tfa_dsp_reset(struct tfa_device *tfa, int state)
 	return TFA98XX_ERROR_OK;
 }
 
-int tfa_set_swprofile(struct tfa_device *tfa, unsigned short new_value)
+static int tfa_set_swprofile(struct tfa_device *tfa, unsigned short new_value)
 {
 	int mtpk, active_value = tfa->profile;
 
@@ -204,7 +204,7 @@ static int tfa_set_bitfield(struct tfa_device *tfa,
 	return tfa_set_bf(tfa, (uint16_t)bitfield, value);
 }
 
-void set_ops_defaults(struct tfa_device_ops *ops)
+static void set_ops_defaults(struct tfa_device_ops *ops)
 {
 	/* defaults */
 	ops->reg_read = tfa98xx_read_register16;

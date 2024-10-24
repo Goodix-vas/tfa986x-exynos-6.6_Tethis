@@ -106,6 +106,14 @@ enum tfa_fw_event { /* not all available on each device */
 #define SB_PARAM_GET_DATA_LOGGER        0x8D
 #define SB_PARAM_GET_TSPKR              0xA8
 
+/* Custom commands: aligned with wrapper */
+/* SET */
+#define CUSTOM_PARAM_SET_TSURF          0x01
+#define CUSTOM_PARAM_SET_BYPASS         0x02
+
+/* GET */
+#define CUSTOM_PARAM_GET_CONFIGURED     0x81
+
 #define BFB_PAR_ID_SET_COEFS            0x00
 #define BFB_PAR_ID_GET_COEFS            0x80
 #define BFB_PAR_ID_GET_CONFIG           0x81
