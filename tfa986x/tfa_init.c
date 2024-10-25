@@ -422,11 +422,12 @@ static enum tfa98xx_error tfa986x_specific(struct tfa_device *tfa)
 
 	case 0x100b66:/**TFA9866 N2B0**/
 		/* ----- generated code start(V8)----- */
-		/* -----  version 9 ----- */
+		/* -----  version 10 ----- */
 		reg_write(tfa, 0x00, 0xf241); //POR=0xf261
 		reg_write(tfa, 0x02, 0x0c28); //POR=0x0008
 		reg_write(tfa, 0x08, 0x009a); //POR=0x00d2
 		reg_write(tfa, 0x50, 0xc000); //POR=0x8000
+		reg_write(tfa, 0x54, 0x10e0); //POR=0x00e0
 		reg_write(tfa, 0x5a, 0x5f5e); //POR=0x36be
 		reg_write(tfa, 0x5b, 0x74e2); //POR=0x7329
 		reg_write(tfa, 0x5c, 0xb02b); //POR=0xde96
