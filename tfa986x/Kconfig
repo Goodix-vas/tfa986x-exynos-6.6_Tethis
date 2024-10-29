@@ -1,13 +1,6 @@
-config SND_SOC_TFA986X
-	tristate "TFA9866 Goodix Smart Amplifier support"
-	depends on I2C
-	depends on LEDS_CLASS
-	help
-	  The TFA9966 smart amplifier. 
+menu "Goodix TFA9866 amplifier configuration"
 
-	  To compile this driver as a module, choose M here: the
-	  module will be called snd_soc_tfa986x.
-
+if SND_SOC_TFA986X
 config TFA_STEREO_NODE
         bool "Stereo sysfs node support"
         default y
@@ -25,3 +18,7 @@ config PLATFORM_EXYNOS
           It adapts codec driver to the target platform.
           It encloses the options, used in codec driver, for Exynos platform.
           It differs the configuration between Exynos platform and the others.
+
+endif # SND_SOC_TFA986X
+
+endmenu
