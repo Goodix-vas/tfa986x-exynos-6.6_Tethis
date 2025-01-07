@@ -87,12 +87,12 @@ int tfa_irq_clear(struct tfa_device *tfa, int bit)
 	/* make bitfield enum */
 	if (bit == tfa->irq_all) {
 		/* operate on all bits */
-		for (reg = TFA98XX_INTERRUPT_IN_REG1;
-			reg < TFA98XX_INTERRUPT_IN_REG1 + 3; reg++)
+		for (reg = TFA98XX_INTERRUPT_IN_REG;
+			reg < TFA98XX_INTERRUPT_IN_REG + 3; reg++)
 			reg_write(tfa, reg, 0xffff); /* all bits */
 	} else if (bit < tfa->irq_max) {
 		reg = (unsigned char)
-			(TFA98XX_INTERRUPT_IN_REG1 + (bit >> 4));
+			(TFA98XX_INTERRUPT_IN_REG + (bit >> 4));
 		reg_write(tfa, reg, 1 << (bit & 0x0f));
 		/* only this bit */
 	} else {
@@ -112,7 +112,7 @@ int tfa_irq_get(struct tfa_device *tfa, int bit)
 
 	if (bit < tfa->irq_max) {
 		/* only this bit */
-		reg = TFA98XX_INTERRUPT_OUT_REG1 + (bit >> 4);
+		reg = TFA98XX_INTERRUPT_OUT_REG + (bit >> 4);
 		mask = 1 << (bit & 0x0f);
 		reg_read(tfa, (unsigned char)reg, &value);
 	} else {
@@ -133,19 +133,19 @@ int tfa_irq_ena(struct tfa_device *tfa, int bit, int state)
 	/* */
 	if (bit == tfa->irq_all) {
 		/* operate on all bits */
-		for (reg = TFA98XX_INTERRUPT_ENABLE_REG1;
-			reg <= TFA98XX_INTERRUPT_ENABLE_REG1
+		for (reg = TFA98XX_INTERRUPT_ENABLE_REG;
+			reg <= TFA98XX_INTERRUPT_ENABLE_REG
 			+ tfa->irq_max / 16; reg++) {
 			reg_write(tfa,
 				(unsigned char)reg,
 				state ? 0xffff : 0); /* all bits */
 			tfa->interrupt_enable
-				[reg - TFA98XX_INTERRUPT_ENABLE_REG1]
+				[reg - TFA98XX_INTERRUPT_ENABLE_REG]
 				= state ? 0xffff : 0; /* all bits */
 		}
 	} else if (bit < tfa->irq_max) {
 		/* only this bit */
-		reg = TFA98XX_INTERRUPT_ENABLE_REG1 + (bit >> 4);
+		reg = TFA98XX_INTERRUPT_ENABLE_REG + (bit >> 4);
 		mask = 1 << (bit & 0x0f);
 		reg_read(tfa, (unsigned char)reg, &value);
 		if (state) /* set */
@@ -157,7 +157,7 @@ int tfa_irq_ena(struct tfa_device *tfa, int bit, int state)
 				(unsigned char)reg,
 				new_value); /* only this bit */
 			tfa->interrupt_enable
-				[reg - TFA98XX_INTERRUPT_ENABLE_REG1]
+				[reg - TFA98XX_INTERRUPT_ENABLE_REG]
 				= new_value;
 		}
 	} else {
@@ -175,13 +175,13 @@ int tfa_irq_mask(struct tfa_device *tfa)
 	int reg;
 
 	if (!tfa->dev_ops.get_mtpb) { /* new types have only 1 reg */
-		reg_write(tfa, TFA98XX_INTERRUPT_ENABLE_REG1, 0);
+		reg_write(tfa, TFA98XX_INTERRUPT_ENABLE_REG, 0);
 		return 0;
 	}
 
 	/* operate on all bits */
-	for (reg = TFA98XX_INTERRUPT_ENABLE_REG1;
-		reg <= TFA98XX_INTERRUPT_ENABLE_REG1
+	for (reg = TFA98XX_INTERRUPT_ENABLE_REG;
+		reg <= TFA98XX_INTERRUPT_ENABLE_REG
 			+ tfa->irq_max / 16; reg++)
 		reg_write(tfa, (unsigned char)reg, 0);
 
@@ -196,18 +196,18 @@ int tfa_irq_unmask(struct tfa_device *tfa)
 	int reg;
 
 	if (!tfa->dev_ops.get_mtpb) { /* new types have only 1 reg */
-		reg_write(tfa, TFA98XX_INTERRUPT_ENABLE_REG1,
+		reg_write(tfa, TFA98XX_INTERRUPT_ENABLE_REG,
 			tfa->interrupt_enable[0]);
 		return 0;
 	}
 
 	/* operate on all bits */
-	for (reg = TFA98XX_INTERRUPT_ENABLE_REG1;
-		reg <= TFA98XX_INTERRUPT_ENABLE_REG1
+	for (reg = TFA98XX_INTERRUPT_ENABLE_REG;
+		reg <= TFA98XX_INTERRUPT_ENABLE_REG
 			+ tfa->irq_max / 16; reg++)
 		reg_write(tfa, (unsigned char)reg,
 			tfa->interrupt_enable
-			[reg - TFA98XX_INTERRUPT_ENABLE_REG1]);
+			[reg - TFA98XX_INTERRUPT_ENABLE_REG]);
 
 	return 0;
 }
@@ -222,8 +222,8 @@ int tfa_irq_set_pol(struct tfa_device *tfa, int bit, int state)
 
 	if (bit == tfa->irq_all) {
 		/* operate on all bits */
-		for (reg = TFA98XX_STATUS_POLARITY_REG1;
-			reg <= TFA98XX_STATUS_POLARITY_REG1
+		for (reg = TFA98XX_INTERRUPT_POLARITY_REG;
+			reg <= TFA98XX_INTERRUPT_POLARITY_REG
 			+ tfa->irq_max / 16; reg++) {
 			reg_write(tfa,
 				(unsigned char)reg,
@@ -231,7 +231,7 @@ int tfa_irq_set_pol(struct tfa_device *tfa, int bit, int state)
 		}
 	} else if (bit < tfa->irq_max) {
 		/* only this bit */
-		reg = TFA98XX_STATUS_POLARITY_REG1 + (bit >> 4);
+		reg = TFA98XX_INTERRUPT_POLARITY_REG + (bit >> 4);
 		mask = 1 << (bit & 0x0f);
 		reg_read(tfa, (unsigned char)reg, &value);
 		if (state) /* Active High */
@@ -256,11 +256,11 @@ void tfa_irq_init(struct tfa_device *tfa)
 	unsigned short irqmask = tfa->interrupt_enable[0];
 
 	/* disable interrupts */
-	reg_write(tfa, TFA98XX_INTERRUPT_ENABLE_REG1, 0);
+	reg_write(tfa, TFA98XX_INTERRUPT_ENABLE_REG, 0);
 	/* clear all active interrupts */
-	reg_write(tfa, TFA98XX_INTERRUPT_IN_REG1, 0xffff);
+	reg_write(tfa, TFA98XX_INTERRUPT_IN_REG, 0xffff);
 	/* enable interrupts */
-	reg_write(tfa, TFA98XX_INTERRUPT_ENABLE_REG1, irqmask);
+	reg_write(tfa, TFA98XX_INTERRUPT_ENABLE_REG, irqmask);
 }
 
 /*
@@ -278,7 +278,7 @@ int tfa_irq_report(struct tfa_device *tfa)
 	tfa0 = tfa98xx_get_tfa_device_from_index(-1);
 
 	/* get status bits */
-	rc = reg_read(tfa, TFA98XX_INTERRUPT_OUT_REG1, &irqstatus);
+	rc = reg_read(tfa, TFA98XX_INTERRUPT_OUT_REG, &irqstatus);
 	if (rc < 0)
 		return -rc;
 
@@ -300,7 +300,7 @@ int tfa_irq_report(struct tfa_device *tfa)
 		}
 
 	/* clear active irqs */
-	reg_write(tfa, TFA98XX_INTERRUPT_IN_REG1, activemask);
+	reg_write(tfa, TFA98XX_INTERRUPT_IN_REG, activemask);
 
 	return 0;
 }
@@ -4114,7 +4114,7 @@ int tfa_dev_probe(int resp_addr, struct tfa_device *tfa)
 
 	/* read revid via low level hal, register 3 */
 	if (tfa98xx_read_register16(tfa,
-		TFA98XX_DEVICE_REVISION, &rev)) {
+		TFA98XX_DEVICE_REVISION0, &rev)) {
 		pr_debug("Error: Unable to read revid from responder:0x%02x\n",
 			resp_addr);
 		return TFA_ERROR;

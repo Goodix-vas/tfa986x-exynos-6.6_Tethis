@@ -24,6 +24,7 @@
 #include <linux/firmware.h>
 #include <linux/debugfs.h>
 #include <linux/version.h>
+#include "inc/dbgprint.h"
 #include "inc/config.h"
 #include "inc/tfa98xx.h"
 #include "inc/tfa.h"
@@ -3631,12 +3632,12 @@ static void tfa98xx_monitor(struct work_struct *work)
 	ret = regmap_read(tfa98xx->regmap, TFA98XX_STATUS_FLAGS1, &val);
 	if (!ret)
 		pr_debug("[%d] STATUS_FLAG1: 0x%04x\n", handle, val);
+	ret = regmap_read(tfa98xx->regmap, TFA98XX_STATUS_FLAGS2, &val);
+	if (!ret)
+		pr_debug("[%d] STATUS_FLAG2: 0x%04x\n", handle, val);
 	ret = regmap_read(tfa98xx->regmap, TFA98XX_STATUS_FLAGS3, &val);
 	if (!ret)
 		pr_debug("[%d] STATUS_FLAG3: 0x%04x\n", handle, val);
-	ret = regmap_read(tfa98xx->regmap, TFA98XX_STATUS_FLAGS4, &val);
-	if (!ret)
-		pr_debug("[%d] STATUS_FLAG4: 0x%04x\n", handle, val);
 	ret = regmap_read(tfa98xx->regmap, TFA98XX_TDM_CONFIG0, &val);
 	if (!ret)
 		pr_debug("[%d] TDM_CONFIG0: 0x%04x\n", handle, val);
@@ -5927,7 +5928,7 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 
 	if ((no_start == 0) && (no_reset == 0)) {
 		ret = regmap_read(tfa98xx->regmap,
-			TFA98XX_DEVICE_REVISION, &reg);
+			TFA98XX_DEVICE_REVISION0, &reg);
 		if (ret < 0) {
 			dev_err(&i2c->dev, "Failed to read Revision register: %d\n",
 				ret);

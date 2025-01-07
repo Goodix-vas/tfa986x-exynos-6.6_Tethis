@@ -25,7 +25,8 @@ struct tfa_irq_name {
 #ifdef N1A
 #include "tfa98xx_genregs_N1A12.h"
 #else
-#include "tfa98xx_genregs_N1C.h"
+//#include "tfa98xx_genregs_N1C.h"
+#include "tfa9866_genregs.h"
 #endif
 
 /* missing 'common' defs break the build but unused in TFA1 context */
