@@ -3254,6 +3254,7 @@ int tfa_ext_register(dsp_send_message_t tfa_send_message,
 		tfa_event_handler
 			= (tfa_event_handler_t *)tfa_ext_event_handler;
 
+	pr_info("%s: dirt %d\n", __func__, dirt);
 	if (dirt == 0x3)
 		tfa_set_ipc_loaded(1);
 
@@ -3261,6 +3262,7 @@ int tfa_ext_register(dsp_send_message_t tfa_send_message,
 
 	return 0;
 }
+EXPORT_SYMBOL(tfa_ext_register);
 
 int tfa_i2c_err_register(tfa_i2c_err_handler_t tfa_i2c_err_handler)
 {

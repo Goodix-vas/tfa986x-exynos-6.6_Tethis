@@ -1014,6 +1014,10 @@ static enum tfa98xx_error _dsp_msg(struct tfa_device *tfa, int lastmessage)
 			if (tfa->dev_ops.dsp_msg)
 				error = (tfa->dev_ops.dsp_msg)
 					((void *)tfa, len, (const char *)blob);
+			if (error != TFA98XX_ERROR_OK) {
+				pr_err("%s: IPC error %d\n", __func__, error);
+				error = TFA98XX_ERROR_OK;
+			}
 		}
 	} else {
 		pr_info("%s: skip if PSTREAM is lost\n",
@@ -1114,10 +1118,12 @@ enum tfa98xx_error dsp_msg(struct tfa_device *tfa,
 		}
 	}
 
-	if (error != TFA98XX_ERROR_OK)
+	if (error != TFA98XX_ERROR_OK) {
 		/* Get actual error code from softDSP */
-		error = (enum tfa98xx_error)
-			(error + TFA98XX_ERROR_BUFFER_RPC_BASE);
+		//error = (enum tfa98xx_error)(error + TFA98XX_ERROR_BUFFER_RPC_BASE);
+		pr_err("%s: IPC error %d\n", __func__, error);
+		error = TFA98XX_ERROR_OK;
+	}
 
 	/* DSP verbose has argument 0x04 */
 	if ((tfa->verbose & 0x04) != 0) {
@@ -1164,10 +1170,12 @@ enum tfa98xx_error dsp_msg_read(struct tfa_device *tfa,
 	}
 	if (error == TFA98XX_ERROR_OK)
 		pr_debug("%s: OK\n", __func__);
-	else
+	else {
 		/* Get actual error code from softDSP */
-		error = (enum tfa98xx_error)
-			(error + TFA98XX_ERROR_BUFFER_RPC_BASE);
+		//error = (enum tfa98xx_error)(error + TFA98XX_ERROR_BUFFER_RPC_BASE);
+		pr_err("%s: IPC error %d\n", __func__, error);
+		error = TFA98XX_ERROR_OK;
+	}
 
 	/* DSP verbose has argument 0x04 */
 	if ((tfa->verbose & 0x04) != 0) {
