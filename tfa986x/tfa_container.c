@@ -2233,20 +2233,20 @@ int tfa_tib_dsp_msgmulti(struct tfa_device *tfa,
 	cc = (tfa->convert_dsp32) ? buf[2] : buf[0];
 
 	if (idx == BLOB_INDEX_INDIVIDUAL) {
-		pr_debug("%s: set last message for individual call: module=%d cmd=%d (index %d)\n",
+		pr_debug("%s: set last message for individual call: module=0x%x cmd=0x%x (index %d)\n",
 			__func__, buf[1], cmd, idx);
 		return 1; /* 1 means last message is done! */
 	}
 
 	if (cmd == SB_PARAM_SET_RE25C && buf[1]
 		== (0x80 | MODULE_SPEAKERBOOST)) {
-		pr_debug("%s: found last message - sending: Re25C cmd=%d (index %d)\n",
+		pr_debug("%s: found last message - sending: Re25C cmd=0x%x (index %d)\n",
 			__func__, cmd, idx);
 		return 1; /* 1 means last message is done! */
 	}
 
 	if (cmd & 0x80) { /* ..._GET_* command */
-		pr_debug("%s: found last message - sending: module=%d cmd=%d CC=%d (index %d)\n",
+		pr_debug("%s: found last message - sending: module=0x%x cmd=0x%x CC=%d (index %d)\n",
 			__func__, buf[1], cmd, cc, idx);
 		return 1; /* 1 means last message is done! with CC check */
 	}

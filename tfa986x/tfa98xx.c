@@ -3425,7 +3425,8 @@ static void tfa98xx_container_loaded
 	}
 
 	/* Enable debug traces */
-	tfa98xx->tfa->verbose = trace_level & 1;
+	//tfa98xx->tfa->verbose = trace_level & 1;
+	tfa98xx->tfa->verbose = 1; // force to set 1 during the evaluation period
 
 	/* prefix is the application name from the cnt */
 	tfa_cont_get_app_name(tfa98xx->tfa, tfa98xx->fw.name);
@@ -3650,6 +3651,7 @@ tfa_monitor_exit:
 
 	mutex_unlock(&probe_lock);
 
+#if 0 // in case verbose is 1, it does not need to monitor several times
 	if (!tfa98xx->tfa->verbose)
 		return;
 
@@ -3660,6 +3662,7 @@ tfa_monitor_exit:
 	/* reschedule */
 	queue_delayed_work(tfa98xx->tfa98xx_wq,
 		&tfa98xx->monitor_work, 5 * HZ);
+#endif
 }
 
 static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
@@ -4451,6 +4454,28 @@ static int tfa98xx_parse_limit_cal_dt(struct device *dev,
 		tfa98xx->i2c->addr, tfa98xx->tfa->upper_limit_cal);
 
 	return ((err_lower == 0 && err_upper == 0) ? 0 : -1);
+}
+
+static int tfa98xx_parse_dummy_cal_dt(struct device *dev,
+	struct tfa98xx *tfa98xx, struct device_node *np)
+{
+	u32 value;
+	int err;
+
+	err = of_property_read_u32(np, "dummy-cal", &value);
+	if (err < 0) {
+		tfa98xx->tfa->mohm[0] = DUMMY_CALIBRATION_DATA;
+		return TFA_NOT_FOUND;
+	}
+
+	if (value <= MIN_CALIBRATION_DATA || value >= MAX_CALIBRATION_DATA)
+		tfa98xx->tfa->mohm[0] = DUMMY_CALIBRATION_DATA;
+	else
+		tfa98xx->tfa->mohm[0] = value;
+	pr_info("[0x%x] dummy cal : %d\n",
+		tfa98xx->i2c->addr, tfa98xx->tfa->mohm[0]);
+
+	return 0;
 }
 
 static int tfa98xx_parse_inchannel_dt(struct device *dev,
@@ -5975,6 +6000,17 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 				"Failed to parse DT node for cal range\n");
 			/* set default range instead */
 		}
+		if (tfa98xx->tfa->mohm[0] <= tfa98xx->tfa->lower_limit_cal ||
+			tfa98xx->tfa->mohm[0] >= tfa98xx->tfa->upper_limit_cal) {
+			ret = tfa98xx_parse_dummy_cal_dt(&i2c->dev, tfa98xx, np);
+			if (ret) {
+				dev_err(&i2c->dev,
+					"Failed to parse DT node for dummy value for calibration\n");
+				/* set default value instead */
+			}
+		}
+		tfa98xx->tfa->mtpex = 1; // mtpex is 1 even in case the dummy cal is used
+		dev_info(&i2c->dev, "[0x%x] cal : %d\n", i2c->addr, tfa98xx->tfa->mohm[0]);
 		ret = tfa98xx_parse_inchannel_dt(&i2c->dev, tfa98xx, np);
 		if (ret) {
 			dev_err(&i2c->dev,

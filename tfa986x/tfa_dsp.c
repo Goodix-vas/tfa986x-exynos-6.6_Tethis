@@ -1011,12 +1011,15 @@ static enum tfa98xx_error _dsp_msg(struct tfa_device *tfa, int lastmessage)
 	if (tfa98xx_count_active_stream(BIT_PSTREAM) > 0) {
 		if (tfa->has_msg == 0) { /* via i2c/ipc */
 			/* Send to the target selected */
-			if (tfa->dev_ops.dsp_msg)
+			if (tfa->dev_ops.dsp_msg) {
 				error = (tfa->dev_ops.dsp_msg)
 					((void *)tfa, len, (const char *)blob);
-			if (error != TFA98XX_ERROR_OK) {
-				pr_err("%s: IPC error %d\n", __func__, error);
-				error = TFA98XX_ERROR_OK;
+				if (error != TFA98XX_ERROR_OK) {
+					pr_err("%s: IPC error %d\n", __func__, error);
+					error = TFA98XX_ERROR_OK;
+				}
+			} else {
+				pr_err("%s: dsp_msg is NULL\n", __func__);
 			}
 		}
 	} else {
