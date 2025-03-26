@@ -21,13 +21,7 @@ struct tfa_irq_name {
 #include "tfa2_tfafieldnames_N1C.h"
 /* diffs for specific devices */
 #include "tfa9866n2_tfafieldnames.h"
-
-#ifdef N1A
-#include "tfa98xx_genregs_N1A12.h"
-#else
-//#include "tfa98xx_genregs_N1C.h"
 #include "tfa9866_genregs.h"
-#endif
 
 /* missing 'common' defs break the build but unused in TFA1 context */
 #define TFA1_BF_AMPINSEL -1

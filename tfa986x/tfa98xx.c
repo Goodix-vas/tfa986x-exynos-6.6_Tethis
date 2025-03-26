@@ -3409,12 +3409,14 @@ static void tfa98xx_container_loaded
 
 /* TEMPORARY, until TFA device is probed before tfa_ext is called */
 	if (tfa98xx->tfa->is_probus_device) {
-		/* Q_PLATFORM: IPC ON PAL TO COMMUNICATE BETWEEN HAL AND ADSP */
-		tfa98xx->tfa->dev_ops.dsp_msg
-			= (dsp_send_message_t)NULL;
-		tfa98xx->tfa->dev_ops.dsp_msg_read
-			= (dsp_read_message_t)NULL;
-		tfa_set_ipc_loaded(1);
+		if (!tfa_get_ipc_loaded()) {
+			/* Q_PLATFORM: IPC ON PAL TO COMMUNICATE BETWEEN HAL AND ADSP */
+			tfa98xx->tfa->dev_ops.dsp_msg
+				= (dsp_send_message_t)NULL;
+			tfa98xx->tfa->dev_ops.dsp_msg_read
+				= (dsp_read_message_t)NULL;
+			tfa_set_ipc_loaded(1);
+		}
 	} else {
 		/* DSP solution: non-probus */
 		tfa98xx->tfa->dev_ops.dsp_msg
