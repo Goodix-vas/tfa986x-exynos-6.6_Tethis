@@ -1349,6 +1349,16 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 		if (tfa == NULL)
 			continue;
 
+		/* MTPEX <reset to force to calibrate> */
+		ret = tfa_dev_mtp_set(tfa, TFA_MTP_EX, 0);
+		if (ret) {
+			pr_info("resetting MTPEX failed (%d)\n", ret);
+			/* suspend until TFA98xx is active */
+			tfa->reset_mtpex = 1;
+		} else {
+			tfa_dev_mtp_set(tfa, TFA_MTP_RE25, 0);
+		}
+
 		pr_info("%s: dev %d - force to enable auto calibration (%s -> enabled)",
 			__func__, idx,
 			(tfa->disable_auto_cal) ? "disabled" : "enabled");

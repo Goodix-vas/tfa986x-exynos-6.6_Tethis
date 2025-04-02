@@ -2106,6 +2106,11 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 		bytes[4] = (uint8_t)((dsp_cal_value[1] >> 8) & 0xff);
 		bytes[5] = (uint8_t)(dsp_cal_value[1] & 0xff);
 
+		if (tfa->blackbox_enable) {
+			/* set logging once before configuring */
+			pr_info("%s: set blackbox logging\n", __func__);
+			tfa_configure_log(tfa->blackbox_enable);
+		}
 	} else { /* calibration is required */
 		pr_info("%s: config ResetRe25C to do calibration\n", __func__);
 		bytes[0] = 0;
@@ -4737,6 +4742,7 @@ enum tfa98xx_error tfa_configure_log(int enable)
 {
 	enum tfa98xx_error err = TFA98XX_ERROR_OK;
 	struct tfa_device *tfa = NULL;
+	uint8_t cmd_buf[3];
 
 	/* set head device */
 	tfa = tfa98xx_get_tfa_device_from_index(-1);
@@ -4745,6 +4751,26 @@ enum tfa98xx_error tfa_configure_log(int enable)
 
 	pr_info("%s: set blackbox control (%d)\n",
 		__func__, enable);
+
+	if (!tfa->is_bypass) {
+		cmd_buf[0] = 0;
+		cmd_buf[1] = 0;
+		/* 0 - disable logger, 1 - enable logger */
+		cmd_buf[2] = (enable) ? 1 : 0;
+
+		pr_info("%s: set blackbox (%d)\n",
+			__func__, enable);
+		err = tfa_dsp_cmd_id_write(tfa, MODULE_SPEAKERBOOST,
+			SB_PARAM_SET_DATA_LOGGER, 3, cmd_buf);
+		if (err) {
+			pr_err("%s: error in setting blackbox, err = %d\n",
+				__func__, err);
+			return err;
+		}
+	} else {
+		pr_info("%s: skip but store setting (%d) in bypass\n",
+			__func__, enable);
+	}
 
 	tfa->blackbox_enable = enable;
 
@@ -4755,7 +4781,11 @@ enum tfa98xx_error tfa_update_log(void)
 {
 	enum tfa98xx_error err = TFA98XX_ERROR_OK;
 	struct tfa_device *tfa = NULL, *ntfa = NULL;
-	int ndev, idx, group, i;
+	int ndev, idx, channel, offset, group, i;
+	uint8_t cmd_buf[TFA_LOG_MAX_COUNT * MAX_HANDLES * 3] = {0};
+	int data[MAX_HANDLES * TFA_LOG_MAX_COUNT] = {0};
+	int read_size;
+
 
 	/* set head device */
 	tfa = tfa98xx_get_tfa_device_from_index(-1);
@@ -4771,17 +4801,88 @@ enum tfa98xx_error tfa_update_log(void)
 	if (ndev < 1)
 		return TFA98XX_ERROR_DEVICE;
 
+	read_size = TFA_LOG_MAX_COUNT * ndev * 3;
+
+	pr_info("%s: read from blackbox\n", __func__);
+	err = tfa_dsp_cmd_id_write_read(tfa, MODULE_SPEAKERBOOST,
+		SB_PARAM_GET_DATA_LOGGER, read_size, cmd_buf);
+	if (err) {
+		pr_err("%s: failed to read data from blackbox, err = %d\n",
+			__func__, err);
+		return err;
+	}
+
+	tfa98xx_convert_bytes2data(read_size, cmd_buf, data);
+
 	for (idx = 0; idx < ndev; idx++) {
 		ntfa = tfa98xx_get_tfa_device_from_index(idx);
 
+		if (ntfa == NULL)
+			continue;
 		if (!tfa_is_active_device(ntfa))
 			continue;
 
+		channel = tfa_get_channel_from_dev_idx(ntfa, -1);
+		if (channel == -1)
+			continue;
+
+		offset = channel * TFA_LOG_MAX_COUNT;
 		group = idx * ID_BLACKBOX_MAX;
-		for (i = DEVICE_SECT_HEAD; i < MAINTENANCE_SECT_HEAD; i++)
-			pr_info("%s: dev %d - blackbox: data[%d] = %d\n",
+
+		pr_info("%s: dev %d - raw blackbox: [X = 0x%08x, T = 0x%08x]\n",
+			__func__, idx,
+			data[offset + ID_MAXX_LOG],
+			data[offset + ID_MAXT_LOG]);
+
+		/* maximum x (um) */
+		data[offset + ID_MAXX_LOG] = (int)
+			((unsigned int)data[offset + ID_MAXX_LOG]
+			/ TFA2_FW_X_DATA_UM_SCALE);
+		if (tfa->log_data[group + ID_MAXX_LOG]
+			< data[offset + ID_MAXX_LOG])
+			tfa->log_data[group + ID_MAXX_LOG]
+				= data[offset + ID_MAXX_LOG];
+
+		/* maximum x kept without reset */
+		if (tfa->log_data[group + ID_MAXX_KEEP_LOG]
+			< data[offset + ID_MAXX_LOG])
+			tfa->log_data[group + ID_MAXX_KEEP_LOG]
+				= data[offset + ID_MAXX_LOG];
+
+		/* maximum t (degC) */
+		data[offset + ID_MAXT_LOG] = (int)
+			(data[offset + ID_MAXT_LOG]
+			/ TFA2_FW_T_DATA_SCALE);
+		if (tfa->log_data[group + ID_MAXT_LOG]
+			< data[offset + ID_MAXT_LOG])
+			tfa->log_data[group + ID_MAXT_LOG]
+				= data[offset + ID_MAXT_LOG];
+
+		/* maximum t kept without reset */
+		if (tfa->log_data[group + ID_MAXT_KEEP_LOG]
+			< data[offset + ID_MAXT_LOG])
+			tfa->log_data[group + ID_MAXT_KEEP_LOG]
+				= data[offset + ID_MAXT_LOG];
+
+		/* counter of x > x_max */
+		tfa->log_data[group + ID_OVERXMAX_COUNT]
+			+= data[offset + ID_OVERXMAX_COUNT];
+
+		/* counter of t > t_max */
+		tfa->log_data[group + ID_OVERTMAX_COUNT]
+			+= data[offset + ID_OVERTMAX_COUNT];
+
+		for (i = 0; i < TFA_LOG_MAX_COUNT; i++)
+			pr_info("%s: dev %d - blackbox: data[%d] = %d (<- %d)\n",
 				__func__, idx, i,
-				tfa->log_data[group + i]);
+				tfa->log_data[group + i],
+				data[offset + i]);
+		pr_info("%s: dev %d - blackbox: data[%d] = %d\n",
+			__func__, idx, ID_MAXX_KEEP_LOG,
+			tfa->log_data[group + ID_MAXX_KEEP_LOG]);
+		pr_info("%s: dev %d - blackbox: data[%d] = %d\n",
+			__func__, idx, ID_MAXT_KEEP_LOG,
+			tfa->log_data[group + ID_MAXT_KEEP_LOG]);
 	}
 
 	return err;
