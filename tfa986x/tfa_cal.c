@@ -10,6 +10,9 @@
 
 #include "inc/tfa_sysfs.h"
 
+#if !defined(TFA_STEREO_NODE)
+#define TFA_STEREO_NODE
+#endif
 #define TFA_CAL_DEV_NAME	"tfa_cal"
 #define FILESIZE_CAL	(10)
 

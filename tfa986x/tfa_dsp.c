@@ -2783,9 +2783,6 @@ enum tfa98xx_error tfa_wait_cal(struct tfa_device *tfa)
 			PRINT_ASSERT(err);
 	}
 
-	if (calibration_done)
-		cal_err = TFA98XX_ERROR_BAD_PARAMETER;
-
 	tfa_restore_after_cal(0, cal_err);
 
 	return cal_err;
@@ -3040,13 +3037,6 @@ tfa_run_wait_calibration(struct tfa_device *tfa, int *calibrate_done)
 		err = TFA98XX_ERROR_STATE_TIMED_OUT;
 	} else {
 		pr_info("Calibration succeeded!\n");
-	}
-
-	/* Give reason why calibration failed! */
-	if (err != TFA98XX_ERROR_OK) {
-		if ((tfa->tfa_family == 2)
-			&& (TFA_GET_BF(tfa, REFCKSEL) == 1))
-			pr_err("Unable to calibrate the device with the internal clock!\n");
 	}
 
 	if (!tfa->is_probus_device)
@@ -4430,6 +4420,8 @@ enum tfa_error tfa_dev_mtp_set(struct tfa_device *tfa,
 		}
 		/* write RE25, calibration data */
 		tfa->mohm[0] = value;
+		pr_info("%s: ch. %d, mohm[0] %d\n", __func__, 
+			tfa_get_channel_from_dev_idx(tfa, -1), tfa->mohm[0]);
 		break;
 	case TFA_MTP_LOCK:
 		break;
