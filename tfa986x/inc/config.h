@@ -20,5 +20,10 @@
 	pr_err("PrintAssert:%s (%s:%d) error code:%d\n",\
 	__func__, __FILE__, __LINE__, e); }
 
+#if !defined(TFA_STEREO_NODE)
+#define TFA_STEREO_NODE
+#endif
+#define TFA_PLATFORM_EXYNOS
+
 #endif /* __CONFIG_LINUX_KERNEL_INC__ */
 

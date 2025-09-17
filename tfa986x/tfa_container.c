@@ -2162,8 +2162,9 @@ int tfa_tib_dsp_msgmulti(struct tfa_device *tfa,
 		} else {
 			blob[idx] = kmalloc(64 * 1024, GFP_KERNEL);
 			/* max length is 64k */
-			if (blob[idx] == NULL)
+			if (blob[idx] == NULL) {
 				return TFA_ERROR;
+			}
 		}
 
 		/* add command ID for multi-msg = 0x008015 */

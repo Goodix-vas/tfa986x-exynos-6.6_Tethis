@@ -34,14 +34,28 @@
 
 #define TFA98XX_VERSION	TFA98XX_API_REV_STR
 
+#if defined(TFA_PLATFORM_EXYNOS)
+#define TFA_PLATFORM "EXYNOS"
+#elif defined(TFA_PLATFORM_QUALCOMM)
+#define TFA_PLATFORM "QUALCOMM"
+#elif defined(TFA_PLATFORM_MTK)
+#define TFA_PLATFORM "MTK"
+#else
+#define TFA_PLATFORM ""
+#endif
+
+#if defined(TFA_STEREO_NODE)
+#define TFA_NODE "STEREO"
+#else
+#define TFA_NODE "MONO"
+#endif
+
 #define I2C_RETRIES 50
 #define I2C_RETRY_DELAY 5 /* ms */
 #define TFA_RESET_DELAY 5 /* ms */
 
 #include <linux/power_supply.h>
 #define REF_TEMP_DEVICE_NAME "battery"
-
-#define TFA98XX_VERSION	TFA98XX_API_REV_STR
 
 /* Change volume selection behavior:
  * Uncomment following line to generate a profile change when updating
@@ -99,9 +113,6 @@ MODULE_PARM_DESC(fw_name, "TFA98xx DSP firmware (container file) name.");
 static int trace_level;
 module_param(trace_level, int, 0444);
 MODULE_PARM_DESC(trace_level, "TFA98xx debug trace level (0=off, b0=verbose,b1=regdmesg,b3=timing).");
-
-static char *dflt_prof_name = "";
-module_param(dflt_prof_name, charp, 0444);
 
 static int no_start;
 module_param(no_start, int, 0444);
@@ -588,7 +599,7 @@ r_c_err:
 static ssize_t tfa98xx_dbgfs_version_read(struct file *file,
 	char __user *user_buf, size_t count, loff_t *ppos)
 {
-	char str[] = TFA98XX_VERSION "\n";
+	char str[] = TFA98XX_VERSION "_" TFA_NODE "_" TFA_PLATFORM "\n";
 	int ret;
 
 	ret = simple_read_from_buffer(user_buf, count, ppos, str, sizeof(str));
@@ -2459,7 +2470,7 @@ static int tfa98xx_info_spkgain(struct snd_kcontrol *kcontrol,
 	mutex_lock(&tfa98xx_mutex);
 	uinfo->count = tfa98xx_device_count;
 	mutex_unlock(&tfa98xx_mutex);
-	uinfo->value.integer.min = -1 * 0x1f;
+	uinfo->value.integer.min = 0;
 	uinfo->value.integer.max = 0x1f;
 
 	return 0;
@@ -2478,24 +2489,9 @@ static int tfa98xx_get_spkgain(struct snd_kcontrol *kcontrol,
 		if (tfa == NULL)
 			continue;
 
-		spkgain = tfa->spkgain;
-		if (spkgain == -1) {
-			spkgain = TFAxx_GET_BF(tfa, TDMSPKG);
-			switch (tfa->rev & 0xff) {
-			case 0x66:
-				spkgain *= (TFAxx_GET_BF(tfa, MUSMODE) == 0)
-					? -1 : 1;
-				break;
-			default:
-				/* neither TFA987x */
-				break;
-			}
-			pr_info("%s: [%d] read current speaker gain 0x%x\n",
-				__func__, tfa->dev_idx, spkgain);
-		} else {
-			spkgain *= (tfa->inplev == 1) ? -1 : 1;
-		}
-
+		spkgain = TFAxx_GET_BF(tfa, TDMSPKG);
+		pr_info("%s: [%d] read current speaker gain %d\n",
+			__func__, tfa->dev_idx, spkgain);
 		ucontrol->value.integer.value[tfa->dev_idx] = spkgain;
 	}
 	mutex_unlock(&tfa98xx_mutex);
@@ -2510,7 +2506,7 @@ static int tfa98xx_set_spkgain(struct snd_kcontrol *kcontrol,
 	struct tfa_device *tfa = NULL;
 	enum tfa98xx_error err;
 	int dev;
-	int set_val, cur_spkgain;
+	int cur_spkgain;
 
 	mutex_lock(&tfa98xx_mutex);
 	list_for_each_entry(tfa98xx, &tfa98xx_device_list, list) {
@@ -2519,38 +2515,14 @@ static int tfa98xx_set_spkgain(struct snd_kcontrol *kcontrol,
 			continue;
 
 		dev = tfa->dev_idx;
-		set_val = ucontrol->value.integer.value[dev];
-		tfa->spkgain = set_val * ((set_val < 0) ? -1 : 1);
-		tfa->inplev = (set_val < 0) ? 1 : 0;
-
+		tfa->spkgain = ucontrol->value.integer.value[dev];
 		cur_spkgain = TFAxx_GET_BF(tfa, TDMSPKG);
-		switch (tfa->rev & 0xff) {
-		case 0x66:
-			cur_spkgain *= (TFAxx_GET_BF(tfa,
-				MUSMODE) == 0) ? -1 : 1;
-			break;
-		default:
-			/* neither TFA987x */
-			break;
-		}
-		pr_info("%s: [%d] set spekaer gain 0x%x / 0x%x (currently, 0x%x)\n",
-			__func__, dev, tfa->spkgain, tfa->inplev, cur_spkgain);
+		pr_info("%s: [%d] set spekaer gain %d (currently, %d)\n",
+			__func__, dev, tfa->spkgain, cur_spkgain);
 
 		err = TFAxx_SET_BF(tfa, TDMSPKG, tfa->spkgain);
 		if (err)
 			pr_err("%s: [%d] failed to set speaker gain\n",
-				__func__, dev);
-		switch (tfa->rev & 0xff) {
-		case 0x66:
-			err = TFAxx_SET_BF(tfa, MUSMODE,
-				(tfa->inplev == 1) ? 0 : 1);
-			break;
-		default:
-			/* neither TFA987x */
-			break;
-		}
-		if (err)
-			pr_err("%s: [%d] failed to set input level\n",
 				__func__, dev);
 	}
 	mutex_unlock(&tfa98xx_mutex);
@@ -3176,7 +3148,6 @@ enum tfa98xx_error tfa98xx_write_register16(struct tfa_device *tfa,
 	int ret;
 	int retries = I2C_RETRIES;
 	struct tfa_device *tfa0 = NULL;
-	int group;
 
 	/* set head device */
 	tfa0 = tfa98xx_get_tfa_device_from_index(-1);
@@ -3206,11 +3177,6 @@ retry:
 			goto retry;
 		}
 
-		if (tfa0 != NULL && tfa0->blackbox_enable) {
-			group = tfa->dev_idx * ID_BLACKBOX_MAX;
-			tfa0->log_data[group + ID_I2CERR_COUNT]++;
-		}
-
 		return TFA98XX_ERROR_FAIL;
 	}
 
@@ -3233,7 +3199,6 @@ enum tfa98xx_error tfa98xx_read_register16(struct tfa_device *tfa,
 	int retries = I2C_RETRIES;
 	int ret;
 	struct tfa_device *tfa0 = NULL;
-	int group;
 
 	/* set head device */
 	tfa0 = tfa98xx_get_tfa_device_from_index(-1);
@@ -3262,11 +3227,6 @@ retry:
 					ret, 0, I2C_RETRIES - retries);
 			msleep(I2C_RETRY_DELAY);
 			goto retry;
-		}
-
-		if (tfa0 != NULL && tfa0->blackbox_enable) {
-			group = tfa->dev_idx * ID_BLACKBOX_MAX;
-			tfa0->log_data[group + ID_I2CERR_COUNT]++;
 		}
 
 		return TFA98XX_ERROR_FAIL;
@@ -3493,27 +3453,6 @@ static void tfa98xx_container_loaded
 	tfa98xx->profile = 0;
 	tfa98xx->vstep = 0;
 
-	/* Override default profile if requested */
-	if (strcmp(dflt_prof_name, "")) {
-		unsigned int i;
-		int nprof = tfa_cnt_get_dev_nprof(tfa98xx->tfa);
-
-		for (i = 0; i < nprof; i++) {
-			if (strcmp(_tfa_cont_profile_name(tfa98xx, i),
-				dflt_prof_name) == 0) {
-				tfa98xx->profile = i;
-				dev_info(tfa98xx->dev,
-					"changing default profile to %s (%d)\n",
-					dflt_prof_name, tfa98xx->profile);
-				break;
-			}
-		}
-		if (i >= nprof)
-			dev_info(tfa98xx->dev,
-				"Default profile override failed (%s profile not found)\n",
-				dflt_prof_name);
-	}
-
 	tfa98xx->dsp_fw_state = TFA98XX_DSP_FW_OK;
 
 	value = tfa_dev_mtp_get(tfa98xx->tfa, TFA_MTP_RE25);
@@ -3521,7 +3460,7 @@ static void tfa98xx_container_loaded
 		pr_info("[0x%x] error in reading calibration data\n",
 			tfa98xx->i2c->addr);
 	tfa98xx->calibrate_done = (value > 0) ? 1 : 0;
-	pr_info("[0x%x] calibrate_done = EFS (%d) 0x%04x\n",
+	pr_info("[0x%x] calibrate_done = EFS (%d) %d\n",
 		tfa98xx->i2c->addr, tfa98xx->calibrate_done, value);
 
 	pr_debug("Firmware init complete\n");
@@ -3618,6 +3557,12 @@ static int tfa98xx_load_container(struct tfa98xx *tfa98xx)
 	} while (tries < TFA98XX_LOADFW_NTRIES
 		&& tfa98xx->dsp_fw_state != TFA98XX_DSP_FW_OK);
 
+	if (ret == 0 && tfa98xx->dsp_fw_state == TFA98XX_DSP_FW_OK) {
+		tfa98xx->probe_state |= TFA98XX_PROBE_STATE_CNT_LOAD_SUCCESS;
+	} else {
+		pr_err("%s: CNT load failed %d\n", __func__, ret);
+	}
+
 	return ret;
 }
 
@@ -3659,6 +3604,10 @@ static void tfa98xx_monitor(struct work_struct *work)
 			tfa_get_bf(tfa98xx->tfa,
 			tfa98xx->overlay_bf));
 	error = tfaxx_status(tfa98xx->tfa);
+
+	/* TFA AMP On is done */
+	// notify_amp_on_done(tfa98xx->tfa->dev_idx); // top:0, bottom:1
+
 	mutex_unlock(&tfa98xx->dsp_lock);
 
 	if (error == TFA98XX_ERROR_DSP_NOT_RUNNING) {
@@ -4051,8 +4000,13 @@ static int tfa98xx_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	switch (fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
 	case SND_SOC_DAIFMT_I2S:
 	case SND_SOC_DAIFMT_DSP_A:
+#if KERNEL_VERSION(6, 17, 0) <= LINUX_VERSION_CODE
+		if ((fmt & SND_SOC_DAIFMT_MASTER_MASK)
+			!= SND_SOC_DAIFMT_CBC_CFC) {
+#else
 		if ((fmt & SND_SOC_DAIFMT_MASTER_MASK)
 			!= SND_SOC_DAIFMT_CBS_CFS) {
+#endif
 			dev_err(cdev, "Invalid Codec main mode\n");
 			return -EINVAL;
 		}
@@ -4180,8 +4134,14 @@ static int _tfa98xx_mute(struct tfa98xx *tfa98xx, int mute, int stream)
 				/* get logging once
 				 * before shutting down pstream
 				 */
+#if !defined(TFA_PLATFORM_QUALCOMM)
 				pr_info("%s: get blackbox logging\n", __func__);
+#if defined(TFA_SUPPORT_NEW_DATALOGGER)
+				tfa_update_log2();
+#else
 				tfa_update_log();
+#endif
+#endif
 			}
 		tfa98xx->tfa->unset_log = 0;
 
@@ -4563,9 +4523,15 @@ static int tfa98xx_parse_inchannel_dt(struct device *dev,
 	return 0;
 }
 
+#if KERNEL_VERSION(6, 17, 0) <= LINUX_VERSION_CODE
+static ssize_t tfa98xx_reg_write(struct file *filp, struct kobject *kobj,
+	const struct bin_attribute *bin_attr,
+	char *buf, loff_t off, size_t count)
+#else
 static ssize_t tfa98xx_reg_write(struct file *filp, struct kobject *kobj,
 	struct bin_attribute *bin_attr,
 	char *buf, loff_t off, size_t count)
+#endif
 {
 	struct device *dev = container_of(kobj, struct device, kobj);
 	struct tfa98xx *tfa98xx = dev_get_drvdata(dev);
@@ -4582,9 +4548,15 @@ static ssize_t tfa98xx_reg_write(struct file *filp, struct kobject *kobj,
 	return 1;
 }
 
+#if KERNEL_VERSION(6, 17, 0) <= LINUX_VERSION_CODE
+static ssize_t tfa98xx_rw_write(struct file *filp, struct kobject *kobj,
+	const struct bin_attribute *bin_attr,
+	char *buf, loff_t off, size_t count)
+#else
 static ssize_t tfa98xx_rw_write(struct file *filp, struct kobject *kobj,
 	struct bin_attribute *bin_attr,
 	char *buf, loff_t off, size_t count)
+#endif
 {
 	struct device *dev = container_of(kobj, struct device, kobj);
 	struct tfa98xx *tfa98xx = dev_get_drvdata(dev);
@@ -4622,9 +4594,15 @@ retry:
 	return ((ret > 1) ? count : -EIO);
 }
 
+#if KERNEL_VERSION(6, 17, 0) <= LINUX_VERSION_CODE
+static ssize_t tfa98xx_rw_read(struct file *filp, struct kobject *kobj,
+	const struct bin_attribute *bin_attr,
+	char *buf, loff_t off, size_t count)
+#else
 static ssize_t tfa98xx_rw_read(struct file *filp, struct kobject *kobj,
 	struct bin_attribute *bin_attr,
 	char *buf, loff_t off, size_t count)
+#endif
 {
 	struct device *dev = container_of(kobj, struct device, kobj);
 	struct tfa98xx *tfa98xx = dev_get_drvdata(dev);
@@ -4672,9 +4650,15 @@ retry:
 	return ((ret > 1) ? count : 0);
 }
 
+#if KERNEL_VERSION(6, 17, 0) <= LINUX_VERSION_CODE
+static ssize_t tfa98xx_customer_read(struct file *filp, struct kobject *kobj,
+	const struct bin_attribute *bin_attr,
+	char *buf, loff_t off, size_t count)
+#else
 static ssize_t tfa98xx_customer_read(struct file *filp, struct kobject *kobj,
 	struct bin_attribute *bin_attr,
 	char *buf, loff_t off, size_t count)
+#endif
 {
 	struct device *dev = container_of(kobj, struct device, kobj);
 	struct tfa98xx *tfa98xx = dev_get_drvdata(dev);
@@ -4741,8 +4725,8 @@ static ssize_t tfa98xx_blackbox_show(struct device *dev,
 			tfa0->log_data[offset + ID_OVERXMAX_COUNT],
 			tfa0->log_data[offset + ID_OVERTMAX_COUNT]);
 		count += snprintf(buf + strlen(buf), PAGE_SIZE,
-			"cntI2Cerr %d, ",
-			tfa0->log_data[offset + ID_I2CERR_COUNT]);
+			"cntOCPerr %d, ",
+			tfa0->log_data[offset + ID_OCP_COUNT]);
 		count += snprintf(buf + strlen(buf), PAGE_SIZE,
 			"cntNoClk %d, ",
 			tfa0->log_data[offset + ID_NOCLK_COUNT]);
@@ -4796,6 +4780,98 @@ static ssize_t tfa98xx_blackbox_store(struct device *dev,
 		if (ret < 0)
 			return ret;
 	}
+
+	return count;
+}
+
+static ssize_t tfa98xx_blackbox2_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct tfa98xx *tfa98xx = dev_get_drvdata(dev);
+	int count = 0;
+	int idx, ndev, offset;
+	struct tfa_device *tfa0 = NULL;
+
+	if (tfa98xx->tfa->tfa_family == 0) {
+		pr_err("[0x%x] %s: system is not initialized: not probed yet!\n",
+			tfa98xx->i2c->addr, __func__);
+		return -EIO;
+	}
+
+	ndev = tfa98xx->tfa->dev_count;
+	if (ndev < 1)
+		return -EINVAL;
+
+	/* set main device */
+	tfa0 = tfa98xx_get_tfa_device_from_index(-1);
+	if (tfa0 == NULL) {
+		pr_err("[0x%x] %s: head device not found\n",
+			tfa98xx->i2c->addr, __func__);
+		return -EINVAL;
+	}
+
+	pr_info("%s: [0x%x]head dev %d blackbox state: %d\n", __func__, 
+		tfa0->resp_address, tfa0->dev_idx, tfa0->blackbox_enable);
+
+	for (idx = 0; idx < ndev; idx++) {
+		offset = idx * ID_BLACKBOX_MAX;
+		if (idx == (ndev-1)) {
+			count += snprintf(buf + strlen(buf), PAGE_SIZE,
+				"%d,%d\n",
+				tfa0->log_data[offset + ID_OCP_COUNT],
+				tfa0->log_data[offset + ID_NOCLK_COUNT]);
+		} else {
+			count += snprintf(buf + strlen(buf), PAGE_SIZE,
+				"%d,%d,",
+				tfa0->log_data[offset + ID_OCP_COUNT],
+				tfa0->log_data[offset + ID_NOCLK_COUNT]);
+		}
+	}
+
+	return count;
+}
+
+static ssize_t tfa98xx_blackbox2_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct tfa98xx *tfa98xx = dev_get_drvdata(dev);
+	struct tfa_device *tfa0 = NULL;
+	int idx, ndev, offset;
+
+	if (tfa98xx->tfa->tfa_family == 0) {
+		pr_err("[0x%x] %s: system is not initialized: not probed yet!\n",
+			tfa98xx->i2c->addr, __func__);
+		return -EIO;
+	}
+
+	/* check string length, and account for eol */
+	if (count < 1)
+		return -EINVAL;
+
+	ndev = tfa98xx->tfa->dev_count;
+	if (ndev < 1)
+		return -EINVAL;
+
+	tfa0 = tfa98xx_get_tfa_device_from_index(-1);
+	if (tfa0 == NULL) {
+		pr_err("[0x%x] %s: head device not found\n",
+			tfa98xx->i2c->addr, __func__);
+		return -EINVAL;
+	}
+
+	pr_info("%s: [0x%x]head dev %d blackbox state: %d\n", __func__, 
+		tfa0->resp_address, tfa0->dev_idx, tfa0->blackbox_enable);
+
+	/* reset ocp and noclk count */
+	if (!strncmp(buf, "0", 1)) {
+		pr_info("%s: reset ocp and noclk count\n", __func__);
+		for (idx = 0; idx < ndev; idx++) {
+			offset = idx * ID_BLACKBOX_MAX;
+			tfa0->log_data[offset + ID_OCP_COUNT] = 0;
+			tfa0->log_data[offset + ID_NOCLK_COUNT] = 0;
+		}
+	
+}
 
 	return count;
 }
@@ -5210,6 +5286,15 @@ static struct device_attribute dev_attr_blackbox = {
 	.store = tfa98xx_blackbox_store,
 };
 
+static struct device_attribute dev_attr_blackbox2 = {
+	.attr = {
+		.name = "log2",
+		.mode = 0600,
+	},
+	.show = tfa98xx_blackbox2_show,
+	.store = tfa98xx_blackbox2_store,
+};
+
 static struct device_attribute dev_attr_gain = {
 	.attr = {
 		.name = "gain",
@@ -5524,7 +5609,11 @@ int tfa98xx_set_blackbox(int enable)
 	if (tfa->is_configured > 0) {
 		pr_info("%s: set blackbox directly\n", __func__);
 		tfa->individual_msg = 1;
+#if defined(TFA_SUPPORT_NEW_DATALOGGER)
+		ret = tfa_configure_log2(enable);
+#else
 		ret = tfa_configure_log(enable);
+#endif
 	}
 
 	return ret;
@@ -5687,21 +5776,28 @@ int tfa98xx_update_spkt_data(int idx)
 	int value[MAX_HANDLES] = {0};
 	int i, ndev, data = 0;
 	int pm = 0;
+	int active_dev = 0;
 
 	if (tfa == NULL)
 		return DEFAULT_REF_TEMP; /* unused device */
 	if (tfa->tfa_family == 0)
 		return DEFAULT_REF_TEMP;
 
-	if (tfa->active_handle > 0) {
-		pr_info("%s: switched to active handle - %d\n",
-			__func__, tfa->active_handle);
-		tfa = tfa98xx_get_tfa_device_from_index(tfa->active_handle);
-		if (tfa == NULL)
-			return DEFAULT_REF_TEMP;
-		if (tfa->tfa_family == 0)
-			return DEFAULT_REF_TEMP;
+	// active_handle : 1-->dev0, 2-->dev1, 4-->dev2, 8-->dev3, 15-->all
+	for (active_dev = 0; active_dev < MAX_HANDLES; active_dev++) {
+		if (tfa->active_handle & (1 << active_dev))
+			break;
 	}
+	pr_info("%s: switched to active handle - %d, active_dev - %d\n",
+		__func__, tfa->active_handle, active_dev);
+
+	if (active_dev == MAX_HANDLES)
+		active_dev = 0;
+	tfa = tfa98xx_get_tfa_device_from_index(active_dev);
+	if (tfa == NULL)
+		return DEFAULT_REF_TEMP;
+	if (tfa->tfa_family == 0)
+		return DEFAULT_REF_TEMP;
 
 	ndev = tfa->dev_count;
 #if !defined(TFA_STEREO_NODE)
@@ -5713,7 +5809,7 @@ int tfa98xx_update_spkt_data(int idx)
 		return DEFAULT_REF_TEMP;
 
 	if (tfa98xx_count_active_stream(BIT_PSTREAM) == 0) {
-		pr_info("%s: skipped - tfadsp is not active!\n",
+		pr_info("%s: skipped - no active stream!\n",
 			__func__);
 		return DEFAULT_REF_TEMP;
 	}
@@ -5795,21 +5891,28 @@ int tfa98xx_write_sknt_control(int idx, int value)
 	struct tfa_device *ntfa = tfa98xx_get_tfa_device_from_index(idx);
 	int group = 0;
 #endif
+	int active_dev = 0;
 
 	if (tfa == NULL)
 		return -ENODEV;
 	if (tfa->tfa_family == 0)
 		return -ENODEV;
 
-	if (tfa->active_handle > 0) {
-		pr_info("%s: switched to active handle - %d\n",
-			__func__, tfa->active_handle);
-		tfa = tfa98xx_get_tfa_device_from_index(tfa->active_handle);
-		if (tfa == NULL)
-			return -ENODEV;
-		if (tfa->tfa_family == 0)
-			return -ENODEV;
+	// active_handle : 1-->dev0, 2-->dev1, 4-->dev2, 8-->dev3, 15-->all
+	for (active_dev = 0; active_dev < MAX_HANDLES; active_dev++) {
+		if (tfa->active_handle & (1 << active_dev))
+			break;
 	}
+	pr_info("%s: switched to active handle - %d, active_dev - %d\n",
+		__func__, tfa->active_handle, active_dev);
+
+	if (active_dev == MAX_HANDLES)
+		active_dev = 0;
+	tfa = tfa98xx_get_tfa_device_from_index(active_dev);
+	if (tfa == NULL)
+		return -ENODEV;
+	if (tfa->tfa_family == 0)
+		return -ENODEV;
 
 	ndev = tfa->dev_count;
 #if !defined(TFA_STEREO_NODE)
@@ -5856,7 +5959,7 @@ int tfa98xx_write_sknt_control(int idx, int value)
 	}
 #endif
 
-	pm = tfa_get_power_state(idx);
+	//pm = tfa_get_power_state(idx);
 
 	pr_info("%s: tfa_stc - dev %d - set surface temperature (%d)\n",
 		__func__, idx, value);
@@ -6053,6 +6156,15 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 	tfa98xx->tfa->cachep = tfa98xx_cache;
 	mutex_unlock(&tfa98xx_mutex);
 
+	if (ret == 0) {
+		tfa98xx->probe_state |= TFA98XX_PROBE_STATE_I2C_INIT_SUCCESS;
+	} else {
+		dev_err(&i2c->dev, "[0x%x] I2C,GPIO init failed %d\n", i2c->addr, ret);
+	}
+
+#if defined(TFA_PLATFORM_QUALCOMM)
+	tfa98xx->tfa->dummy_cal= DUMMY_CALIBRATION_DATA;
+#endif
 	if (np) {
 		ret = tfa98xx_parse_limit_cal_dt(&i2c->dev, tfa98xx, np);
 		if (ret) {
@@ -6068,6 +6180,10 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 					"Failed to parse DT node for dummy value for calibration\n");
 				/* set default value instead */
 			}
+#if defined(TFA_PLATFORM_QUALCOMM)
+			tfa98xx->tfa->dummy_cal= tfa98xx->tfa->mohm[0];
+			dev_info(&i2c->dev, "[0x%x] dummy_cal : %d\n", i2c->addr, tfa98xx->tfa->dummy_cal);
+#endif
 		}
 		tfa98xx->tfa->mtpex = 1; // mtpex is 1 even in case the dummy cal is used
 		dev_info(&i2c->dev, "[0x%x] cal : %d\n", i2c->addr, tfa98xx->tfa->mohm[0]);
@@ -6108,6 +6224,12 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 	if (ret < 0) {
 		dev_err(&i2c->dev, "Failed to register TFA98xx: %d\n", ret);
 		goto tfa98xx_i2c_probe_exit;
+	}
+
+	if (ret == 0) {
+		tfa98xx->probe_state |= TFA98XX_PROBE_STATE_DAI_INIT_SUCCESS;
+	} else {
+		dev_err(&i2c->dev, "[0x%x] DAI init failed %d\n", i2c->addr, ret);
 	}
 
 	if (gpio_is_valid(tfa98xx->irq_gpio) &&
@@ -6155,6 +6277,10 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 	ret = device_create_file(&i2c->dev, &dev_attr_blackbox);
 	if (ret)
 		dev_info(&i2c->dev, "error creating sysfs node, log\n");
+
+	ret = device_create_file(&i2c->dev, &dev_attr_blackbox2);
+	if (ret)
+		dev_info(&i2c->dev, "error creating sysfs node, log2\n");
 
 	ret = device_create_file(&i2c->dev, &dev_attr_gain);
 	if (ret)
@@ -6251,6 +6377,37 @@ tfa98xx_i2c_probe_fail:
 	return ret;
 }
 
+/*
+ * Top: dev_idx=0, Bottom: dev_idx=1
+ * Return value:
+ *** 0x1 : I2C init. success
+ *** 0x2 : DAI init. success
+ *** 0x4 : Container loading success
+ *** 0x7 : All success
+ *** -1 : Init. fail
+ */
+int tfa98xx_get_init_state(int dev_idx)
+{
+	int ret = -1;
+	struct tfa98xx *tfa98xx;
+
+	pr_info("%s: device index %d\n", __func__, dev_idx);
+	list_for_each_entry(tfa98xx, &tfa98xx_device_list, list) {
+		if (dev_idx == tfa98xx->tfa->dev_idx)
+			break;
+	}
+
+	pr_info("%s: probe_state %d\n", __func__, tfa98xx->probe_state);
+	if (tfa98xx) {
+		ret = tfa98xx->probe_state;
+		if (tfa98xx->probe_state == 0x0)
+			ret = -1;
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(tfa98xx_get_init_state);
+
 #if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 static void tfa98xx_i2c_remove(struct i2c_client *i2c)
 #else
@@ -6334,7 +6491,7 @@ static int __init tfa98xx_i2c_init(void)
 {
 	int ret = 0;
 
-	pr_info("TFA98XX driver version %s\n", TFA98XX_VERSION);
+	pr_info("TFA98XX driver version %s %s %s\n", TFA98XX_VERSION, TFA_NODE, TFA_PLATFORM);
 
 	/* Enable debug traces */
 	tfa98xx_kmsg_regs = trace_level & 2;
